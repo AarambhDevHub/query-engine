@@ -9,7 +9,8 @@ A high-performance, production-ready SQL query engine built in Rust with Apache 
 ## 🚀 Features
 
 - **⚡ High Performance**: Vectorized execution using Apache Arrow for maximum throughput
-- **🔍 SQL Support**: Comprehensive SQL syntax including SELECT, WHERE, GROUP BY, ORDER BY, LIMIT
+- **🔍 SQL Support**: Comprehensive SQL syntax including SELECT, WHERE, GROUP BY, ORDER BY, LIMIT, and JOINs
+- **🔗 JOIN Operations**: Full support for INNER, LEFT, RIGHT, FULL OUTER, and CROSS JOINs with table aliases
 - **📊 Aggregate Functions**: COUNT, SUM, AVG, MIN, MAX with GROUP BY support
 - **📁 Multiple Data Sources**: CSV, Parquet, and in-memory tables
 - **🎯 Query Optimization**: Predicate pushdown and logical plan optimization
@@ -91,21 +92,21 @@ qe query \
   --table users \
   --file data/users.csv
 
-# Query a Parquet file
+# Query with JOIN
 qe query \
-  --sql "SELECT department, SUM(salary) FROM employees GROUP BY department" \
+  --sql "SELECT e.name, d.dept_name FROM employees e JOIN departments d ON e.dept_id = d.id" \
   --table employees \
-  --file data/employees.parquet \
-  --output table
+  --file data/employees.csv
 ```
 
 ### Load and Query Data
 
 ```
 # Inside REPL
-qe> .load csv data/users.csv users
-qe> SELECT name, age FROM users WHERE age > 25 ORDER BY age DESC;
-qe> .describe users
+qe> .load csv data/employees.csv employees
+qe> .load csv data/departments.csv departments
+qe> SELECT e.name, d.dept_name FROM employees e JOIN departments d ON e.dept_id = d.dept_id;
+qe> .describe employees
 ```
 
 ## 🏛️ Architecture
@@ -186,6 +187,9 @@ qe>                         # Interactive prompt
 # Query execution
 qe query -s "SELECT * FROM users" -t users -f data.csv
 
+# JOIN query
+qe query -s "SELECT * FROM orders o JOIN customers c ON o.customer_id = c.id" -t orders -f orders.csv
+
 # Table registration
 qe register -n users -f data/users.csv -t csv
 
@@ -215,6 +219,27 @@ SELECT column1, column2 FROM table_name;
 -- WHERE clause
 SELECT * FROM users WHERE age > 25 AND status = 'active';
 
+-- JOIN operations (NEW!)
+SELECT e.name, e.salary, d.dept_name
+FROM employees e
+INNER JOIN departments d ON e.dept_id = d.dept_id;
+
+-- LEFT JOIN
+SELECT u.name, o.order_id
+FROM users u
+LEFT JOIN orders o ON u.id = o.user_id;
+
+-- CROSS JOIN
+SELECT p.name, c.category
+FROM products p
+CROSS JOIN categories c;
+
+-- Multiple JOINs
+SELECT e.name, d.dept_name, l.location
+FROM employees e
+JOIN departments d ON e.dept_id = d.id
+JOIN locations l ON d.location_id = l.id;
+
 -- Aggregate functions
 SELECT department, COUNT(*), AVG(salary)
 FROM employees
@@ -227,16 +252,24 @@ FROM employees
 ORDER BY salary DESC
 LIMIT 10;
 
--- Multiple aggregates
+-- Complex query with JOINs and aggregates
 SELECT
-  region,
-  COUNT(*) as total_orders,
-  SUM(amount) as total_sales,
-  AVG(amount) as avg_sale
-FROM sales
-GROUP BY region
-ORDER BY total_sales DESC;
+  d.dept_name,
+  COUNT(e.id) as employee_count,
+  AVG(e.salary) as avg_salary
+FROM departments d
+LEFT JOIN employees e ON d.dept_id = e.dept_id
+GROUP BY d.dept_name
+ORDER BY avg_salary DESC;
 ```
+
+### JOIN Types Supported
+
+- **INNER JOIN**: Returns matching rows from both tables
+- **LEFT JOIN** (LEFT OUTER JOIN): Returns all rows from left table with matching rows from right
+- **RIGHT JOIN** (RIGHT OUTER JOIN): Returns all rows from right table with matching rows from left
+- **FULL JOIN** (FULL OUTER JOIN): Returns all rows when there's a match in either table
+- **CROSS JOIN**: Returns Cartesian product of both tables
 
 ### Supported Operators
 
@@ -296,7 +329,40 @@ async fn main() -> Result<()> {
 }
 ```
 
-### Example 2: Aggregate Queries
+### Example 2: JOIN Queries
+
+```
+-- Load employee and department data
+.load csv data/employees.csv employees
+.load csv data/departments.csv departments
+
+-- Simple INNER JOIN
+SELECT e.name, e.salary, d.dept_name
+FROM employees e
+INNER JOIN departments d ON e.dept_id = d.dept_id;
+
+-- LEFT JOIN to include all employees
+SELECT e.name, e.salary, d.dept_name
+FROM employees e
+LEFT JOIN departments d ON e.dept_id = d.dept_id;
+
+-- JOIN with WHERE clause
+SELECT e.name, d.dept_name, d.location
+FROM employees e
+JOIN departments d ON e.dept_id = d.dept_id
+WHERE d.location = 'Building A' AND e.salary > 70000;
+
+-- JOIN with aggregates
+SELECT d.dept_name,
+       COUNT(e.id) as employee_count,
+       AVG(e.salary) as avg_salary
+FROM departments d
+LEFT JOIN employees e ON d.dept_id = e.dept_id
+GROUP BY d.dept_name
+ORDER BY avg_salary DESC;
+```
+
+### Example 3: Aggregate Queries
 
 ```
 -- Load data
@@ -318,7 +384,7 @@ FROM sales
 GROUP BY month;
 ```
 
-### Example 3: Complex Analytics
+### Example 4: Complex Analytics
 
 ```
 -- Top performing products
@@ -335,7 +401,7 @@ ORDER BY total_revenue DESC
 LIMIT 10;
 ```
 
-### Example 4: Using the CLI
+### Example 5: Using the CLI
 
 ```
 # Start REPL and load data
@@ -343,6 +409,9 @@ $ qe
 
 qe> .load csv data/employees.csv employees
 ✓ Loaded table 'employees' from data/employees.csv (1000 rows, 5 columns)
+
+qe> .load csv data/departments.csv departments
+✓ Loaded table 'departments' from data/departments.csv (10 rows, 4 columns)
 
 qe> .describe employees
 Table: employees
@@ -354,14 +423,17 @@ Rows: 1000
 ├───────────────┼──────────┼──────────┤
 │ employee_id   │ Int64    │ NO       │
 │ name          │ Utf8     │ NO       │
-│ department    │ Utf8     │ NO       │
+│ department_id │ Int64    │ NO       │
 │ salary        │ Float64  │ NO       │
 │ hire_date     │ Date32   │ YES      │
 └───────────────┴──────────┴──────────┘
 
-qe> SELECT department, AVG(salary) FROM employees GROUP BY department;
+qe> SELECT e.name, e.salary, d.dept_name
+    FROM employees e
+    JOIN departments d ON e.department_id = d.dept_id
+    WHERE e.salary > 80000;
 ✓ Query parsed and planned successfully!
-Planning time: 2.45ms
+Planning time: 0.05ms
 ```
 
 ## ⚡ Performance
@@ -371,6 +443,7 @@ Planning time: 2.45ms
 - **Vectorized Execution**: SIMD operations via Apache Arrow
 - **Predicate Pushdown**: Filter data early in the pipeline
 - **Projection Pushdown**: Read only required columns
+- **JOIN Optimization**: Efficient hash-based JOIN implementation
 - **LTO Compilation**: Link-time optimization for release builds
 - **Zero-Copy Operations**: Minimize memory allocations
 
@@ -382,6 +455,9 @@ cargo bench
 
 # Custom benchmark
 qe bench -q queries/complex.sql -i 1000
+
+# JOIN benchmark
+cargo run --example join_query
 ```
 
 **Sample Results** (your results may vary):
@@ -389,6 +465,7 @@ qe bench -q queries/complex.sql -i 1000
 ```
 Benchmark Results:
 ──────────────────────────────────────────────────
+  Query Type:      INNER JOIN
   Iterations:      1000
   Total time:      1.23s
   Average:         1.23ms
@@ -440,7 +517,7 @@ cargo test
 cargo test -- --nocapture
 
 # Run specific test
-cargo test test_name
+cargo test test_join_queries
 
 # Run tests in specific crate
 cargo test -p query-parser
@@ -454,6 +531,9 @@ cargo run --example simple_query
 
 # Aggregate query example
 cargo run --example aggregate_query
+
+# JOIN query example (NEW!)
+cargo run --example join_query
 
 # Full demo
 cargo run --example full_query_demo
@@ -486,6 +566,16 @@ qe> .load csv ./data/users.csv users
 ```
 -- Solution: Check table schema
 qe> .describe users
+```
+
+**Issue**: `Failed to create logical plan` for CROSS JOIN
+```
+-- Solution: Make sure table aliases are used correctly
+-- Good:
+SELECT e.name, d.dept_name FROM employees e CROSS JOIN departments d;
+
+-- Bad:
+SELECT name, dept_name FROM employees CROSS JOIN departments;
 ```
 
 **Issue**: Slow query performance
@@ -526,13 +616,13 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 ## 📞 Contact
 
-- **Author**: Darshan vichhi (Aarambh)
+- **Author**: Darshan Vichhi (Aarambh)
 - **GitHub**: [@AarambhDevHub](https://github.com/AarambhDevHub)
 - **Issues**: [GitHub Issues](https://github.com/AarambhDevHub/query-engine/issues)
 
 ## 🗺️ Roadmap
 
-- [ ] JOIN operations (INNER, LEFT, RIGHT, FULL)
+- [x] ~~JOIN operations (INNER, LEFT, RIGHT, FULL, CROSS)~~ ✅ **Completed!**
 - [ ] Subqueries and CTEs
 - [ ] Window functions
 - [ ] User-defined functions (UDFs)
@@ -548,6 +638,12 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 **Version**: 0.1.0
 **Status**: Active Development
 **Stability**: Alpha
+
+### Recently Completed
+- ✅ Full JOIN support (INNER, LEFT, RIGHT, FULL OUTER, CROSS)
+- ✅ Table aliases and qualified column names
+- ✅ Multiple JOIN operations in single query
+- ✅ JOIN with WHERE, GROUP BY, ORDER BY clauses
 
 ---
 

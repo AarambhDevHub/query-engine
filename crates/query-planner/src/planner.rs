@@ -1,16 +1,17 @@
 use crate::logical_plan::{LogicalExpr, LogicalPlan, ScalarValue};
 use query_core::{Field, QueryError, Result, Schema};
 use query_parser::{Expr, Literal, SelectItem, Statement};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 pub struct Planner {
-    schemas: std::collections::HashMap<String, Schema>,
+    schemas: HashMap<String, Schema>,
 }
 
 impl Planner {
     pub fn new() -> Self {
         Self {
-            schemas: std::collections::HashMap::new(),
+            schemas: HashMap::new(),
         }
     }
 
@@ -25,6 +26,8 @@ impl Planner {
     }
 
     fn plan_select(&self, select: &query_parser::SelectStatement) -> Result<LogicalPlan> {
+        let mut table_aliases = HashMap::new();
+
         let mut plan = if let Some(table_ref) = &select.from {
             let schema = self
                 .schemas
@@ -32,9 +35,18 @@ impl Planner {
                 .ok_or_else(|| QueryError::TableNotFound(table_ref.name.clone()))?
                 .clone();
 
+            // Register table alias
+            if let Some(alias) = &table_ref.alias {
+                table_aliases.insert(alias.clone(), table_ref.name.clone());
+            }
+            table_aliases.insert(table_ref.name.clone(), table_ref.name.clone());
+
+            // Create schema with prefixed column names for JOINs
+            let prefixed_schema = self.prefix_schema_with_table(&schema, &table_ref.name);
+
             LogicalPlan::TableScan {
                 table_name: table_ref.name.clone(),
-                schema,
+                schema: prefixed_schema,
                 projection: None,
             }
         } else {
@@ -43,11 +55,56 @@ impl Planner {
             }
         };
 
+        // Process JOINs
+        for join in &select.joins {
+            let right_schema = self
+                .schemas
+                .get(&join.right.name)
+                .ok_or_else(|| QueryError::TableNotFound(join.right.name.clone()))?
+                .clone();
+
+            // Register right table alias
+            if let Some(alias) = &join.right.alias {
+                table_aliases.insert(alias.clone(), join.right.name.clone());
+            }
+            table_aliases.insert(join.right.name.clone(), join.right.name.clone());
+
+            // Create schema with prefixed column names for JOINs
+            let prefixed_right_schema =
+                self.prefix_schema_with_table(&right_schema, &join.right.name);
+
+            let right_plan = LogicalPlan::TableScan {
+                table_name: join.right.name.clone(),
+                schema: prefixed_right_schema.clone(),
+                projection: None,
+            };
+
+            // Build joined schema
+            let left_schema = plan.schema().clone();
+            let joined_schema = self.merge_schemas(&left_schema, &prefixed_right_schema)?;
+
+            // Parse ON condition if exists
+            let on_expr = if let Some(on) = &join.on {
+                Some(self.create_logical_expr_with_context(on, &joined_schema, &table_aliases)?)
+            } else {
+                None
+            };
+
+            plan = LogicalPlan::Join {
+                left: Arc::new(plan),
+                right: Arc::new(right_plan),
+                join_type: join.join_type,
+                on: on_expr,
+                schema: joined_schema,
+            };
+        }
+
         let base_schema = plan.schema().clone();
 
         // Apply WHERE clause
         if let Some(selection) = &select.selection {
-            let predicate = self.create_logical_expr(selection, &base_schema)?;
+            let predicate =
+                self.create_logical_expr_with_context(selection, &base_schema, &table_aliases)?;
             plan = LogicalPlan::Filter {
                 input: Arc::new(plan),
                 predicate,
@@ -62,7 +119,7 @@ impl Planner {
             let group_exprs_result: Result<Vec<_>> = select
                 .group_by
                 .iter()
-                .map(|e| self.create_logical_expr(e, &base_schema))
+                .map(|e| self.create_logical_expr_with_context(e, &base_schema, &table_aliases))
                 .collect();
             let group_exprs = group_exprs_result?;
 
@@ -73,33 +130,56 @@ impl Planner {
             for item in &select.projection {
                 match item {
                     SelectItem::Wildcard => {
-                        // For wildcard with GROUP BY, include all group columns
-                        for (_i, field) in base_schema.fields().iter().enumerate() {
+                        for field in base_schema.fields().iter() {
                             result_fields.push(field.clone());
+                        }
+                    }
+                    SelectItem::QualifiedWildcard(table) => {
+                        // Find all fields belonging to this table
+                        let actual_table = table_aliases.get(table).unwrap_or(table);
+                        for field in base_schema.fields().iter() {
+                            if field.name().starts_with(&format!("{}.", actual_table)) {
+                                result_fields.push(field.clone());
+                            }
                         }
                     }
                     SelectItem::UnnamedExpr(expr) => {
                         if self.is_aggregate(expr) {
-                            let logical_expr = self.create_logical_expr(expr, &base_schema)?;
+                            let logical_expr = self.create_logical_expr_with_context(
+                                expr,
+                                &base_schema,
+                                &table_aliases,
+                            )?;
                             let field = self.aggregate_expr_to_field(&logical_expr, "aggregate")?;
                             aggr_exprs.push(logical_expr);
                             result_fields.push(field);
                         } else {
-                            // Non-aggregate column in SELECT with GROUP BY - must be in GROUP BY
-                            let logical_expr = self.create_logical_expr(expr, &base_schema)?;
+                            let logical_expr = self.create_logical_expr_with_context(
+                                expr,
+                                &base_schema,
+                                &table_aliases,
+                            )?;
                             let field = self.expr_to_field(&logical_expr, &base_schema)?;
                             result_fields.push(field);
                         }
                     }
                     SelectItem::ExprWithAlias { expr, alias } => {
                         if self.is_aggregate(expr) {
-                            let logical_expr = self.create_logical_expr(expr, &base_schema)?;
+                            let logical_expr = self.create_logical_expr_with_context(
+                                expr,
+                                &base_schema,
+                                &table_aliases,
+                            )?;
                             let data_type = query_core::DataType::Float64;
                             let field = Field::new(alias, data_type, true);
                             aggr_exprs.push(logical_expr);
                             result_fields.push(field);
                         } else {
-                            let logical_expr = self.create_logical_expr(expr, &base_schema)?;
+                            let logical_expr = self.create_logical_expr_with_context(
+                                expr,
+                                &base_schema,
+                                &table_aliases,
+                            )?;
                             let data_type = self.expr_data_type(&logical_expr, &base_schema)?;
                             let field = Field::new(alias, data_type, true);
                             result_fields.push(field);
@@ -118,8 +198,11 @@ impl Planner {
             };
         } else {
             // No aggregates - apply normal projection
-            let (proj_exprs, proj_schema) =
-                self.plan_projection(&select.projection, plan.schema())?;
+            let (proj_exprs, proj_schema) = self.plan_projection_with_context(
+                &select.projection,
+                plan.schema(),
+                &table_aliases,
+            )?;
             plan = LogicalPlan::Projection {
                 input: Arc::new(plan),
                 exprs: proj_exprs,
@@ -132,9 +215,14 @@ impl Planner {
             let exprs: Result<Vec<_>> = select
                 .order_by
                 .iter()
-                .map(|order| self.create_logical_expr(&order.expr, plan.schema()))
+                .map(|order| {
+                    self.create_logical_expr_with_context(
+                        &order.expr,
+                        plan.schema(),
+                        &table_aliases,
+                    )
+                })
                 .collect();
-
             let ascending: Vec<bool> = select.order_by.iter().map(|order| order.asc).collect();
 
             plan = LogicalPlan::Sort {
@@ -156,10 +244,144 @@ impl Planner {
         Ok(plan)
     }
 
-    fn plan_projection(
+    fn prefix_schema_with_table(&self, schema: &Schema, table_name: &str) -> Schema {
+        let prefixed_fields: Vec<Field> = schema
+            .fields()
+            .iter()
+            .map(|field| {
+                Field::new(
+                    format!("{}.{}", table_name, field.name()),
+                    field.data_type().clone(),
+                    field.nullable(),
+                )
+            })
+            .collect();
+
+        Schema::new(prefixed_fields)
+    }
+
+    fn merge_schemas(&self, left: &Schema, right: &Schema) -> Result<Schema> {
+        let mut fields = Vec::new();
+
+        // Add all fields from left schema
+        for field in left.fields() {
+            fields.push(field.clone());
+        }
+
+        // Add all fields from right schema
+        for field in right.fields() {
+            fields.push(field.clone());
+        }
+
+        Ok(Schema::new(fields))
+    }
+
+    fn create_logical_expr_with_context(
+        &self,
+        expr: &Expr,
+        schema: &Schema,
+        table_aliases: &HashMap<String, String>,
+    ) -> Result<LogicalExpr> {
+        match expr {
+            Expr::Column(name) => {
+                // Try to find the column in schema (could be unqualified)
+                let index = schema.index_of(name).or_else(|_| {
+                    // If not found directly, try to find it with any table prefix
+                    for field in schema.fields() {
+                        if field.name().ends_with(&format!(".{}", name)) {
+                            return schema.index_of(field.name());
+                        }
+                    }
+                    Err(QueryError::ColumnNotFound(name.clone()))
+                })?;
+
+                let field_name = schema
+                    .field(index)
+                    .ok_or_else(|| QueryError::ColumnNotFound(name.clone()))?
+                    .name()
+                    .to_string();
+
+                Ok(LogicalExpr::Column {
+                    name: field_name,
+                    index,
+                })
+            }
+            Expr::QualifiedColumn { table, column } => {
+                // Resolve table alias
+                let actual_table = table_aliases.get(table).unwrap_or(table);
+                let qualified_name = format!("{}.{}", actual_table, column);
+
+                // Try to find the qualified column
+                let index = schema.index_of(&qualified_name).or_else(|_| {
+                    // Fallback: try to find by column name only
+                    schema.index_of(column).or_else(|_| {
+                        // Last resort: find any field ending with this column name
+                        for field in schema.fields() {
+                            if field.name().ends_with(&format!(".{}", column)) {
+                                return schema.index_of(field.name());
+                            }
+                        }
+                        Err(QueryError::ColumnNotFound(qualified_name.clone()))
+                    })
+                })?;
+
+                let field_name = schema
+                    .field(index)
+                    .ok_or_else(|| QueryError::ColumnNotFound(qualified_name.clone()))?
+                    .name()
+                    .to_string();
+
+                Ok(LogicalExpr::Column {
+                    name: field_name,
+                    index,
+                })
+            }
+            Expr::Literal(lit) => Ok(LogicalExpr::Literal(self.create_scalar_value(lit)?)),
+            Expr::BinaryOp { left, op, right } => Ok(LogicalExpr::BinaryExpr {
+                left: Box::new(self.create_logical_expr_with_context(
+                    left,
+                    schema,
+                    table_aliases,
+                )?),
+                op: *op,
+                right: Box::new(self.create_logical_expr_with_context(
+                    right,
+                    schema,
+                    table_aliases,
+                )?),
+            }),
+            Expr::UnaryOp { op, expr } => Ok(LogicalExpr::UnaryExpr {
+                op: *op,
+                expr: Box::new(self.create_logical_expr_with_context(
+                    expr,
+                    schema,
+                    table_aliases,
+                )?),
+            }),
+            Expr::AggregateFunction { func, expr } => Ok(LogicalExpr::AggregateFunction {
+                func: *func,
+                expr: Box::new(self.create_logical_expr_with_context(
+                    expr,
+                    schema,
+                    table_aliases,
+                )?),
+            }),
+            Expr::Cast { expr, data_type } => Ok(LogicalExpr::Cast {
+                expr: Box::new(self.create_logical_expr_with_context(
+                    expr,
+                    schema,
+                    table_aliases,
+                )?),
+                data_type: data_type.clone(),
+            }),
+        }
+    }
+
+    fn plan_projection_with_context(
         &self,
         items: &[SelectItem],
         input_schema: &Schema,
+        table_aliases: &HashMap<String, String>,
     ) -> Result<(Vec<LogicalExpr>, Schema)> {
         let mut exprs = Vec::new();
         let mut fields = Vec::new();
@@ -175,14 +397,28 @@ impl Planner {
                         fields.push(field.clone());
                     }
                 }
+                SelectItem::QualifiedWildcard(table) => {
+                    let actual_table = table_aliases.get(table).unwrap_or(table);
+                    for (i, field) in input_schema.fields().iter().enumerate() {
+                        if field.name().starts_with(&format!("{}.", actual_table)) {
+                            exprs.push(LogicalExpr::Column {
+                                name: field.name().to_string(),
+                                index: i,
+                            });
+                            fields.push(field.clone());
+                        }
+                    }
+                }
                 SelectItem::UnnamedExpr(expr) => {
-                    let logical_expr = self.create_logical_expr(expr, input_schema)?;
+                    let logical_expr =
+                        self.create_logical_expr_with_context(expr, input_schema, table_aliases)?;
                     let field = self.expr_to_field(&logical_expr, input_schema)?;
                     exprs.push(logical_expr);
                     fields.push(field);
                 }
                 SelectItem::ExprWithAlias { expr, alias } => {
-                    let mut logical_expr = self.create_logical_expr(expr, input_schema)?;
+                    let mut logical_expr =
+                        self.create_logical_expr_with_context(expr, input_schema, table_aliases)?;
                     let data_type = self.expr_data_type(&logical_expr, input_schema)?;
                     logical_expr = LogicalExpr::Alias {
                         expr: Box::new(logical_expr),
@@ -198,7 +434,7 @@ impl Planner {
         Ok((exprs, Schema::new(fields)))
     }
 
-    fn create_logical_expr(&self, expr: &Expr, schema: &Schema) -> Result<LogicalExpr> {
+    fn _create_logical_expr(&self, expr: &Expr, schema: &Schema) -> Result<LogicalExpr> {
         match expr {
             Expr::Column(name) => {
                 let index = schema.index_of(name)?;
@@ -207,22 +443,32 @@ impl Planner {
                     index,
                 })
             }
+            Expr::QualifiedColumn { table, column } => {
+                let qualified_name = format!("{}.{}", table, column);
+                let index = schema
+                    .index_of(&qualified_name)
+                    .or_else(|_| schema.index_of(column))?;
+                Ok(LogicalExpr::Column {
+                    name: qualified_name,
+                    index,
+                })
+            }
             Expr::Literal(lit) => Ok(LogicalExpr::Literal(self.create_scalar_value(lit)?)),
             Expr::BinaryOp { left, op, right } => Ok(LogicalExpr::BinaryExpr {
-                left: Box::new(self.create_logical_expr(left, schema)?),
+                left: Box::new(self._create_logical_expr(left, schema)?),
                 op: *op,
-                right: Box::new(self.create_logical_expr(right, schema)?),
+                right: Box::new(self._create_logical_expr(right, schema)?),
             }),
             Expr::UnaryOp { op, expr } => Ok(LogicalExpr::UnaryExpr {
                 op: *op,
-                expr: Box::new(self.create_logical_expr(expr, schema)?),
+                expr: Box::new(self._create_logical_expr(expr, schema)?),
             }),
             Expr::AggregateFunction { func, expr } => Ok(LogicalExpr::AggregateFunction {
                 func: *func,
-                expr: Box::new(self.create_logical_expr(expr, schema)?),
+                expr: Box::new(self._create_logical_expr(expr, schema)?),
             }),
             Expr::Cast { expr, data_type } => Ok(LogicalExpr::Cast {
-                expr: Box::new(self.create_logical_expr(expr, schema)?),
+                expr: Box::new(self._create_logical_expr(expr, schema)?),
                 data_type: data_type.clone(),
             }),
         }

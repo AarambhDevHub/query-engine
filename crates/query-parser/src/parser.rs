@@ -32,6 +32,12 @@ impl Parser {
             None
         };
 
+        // Parse multiple JOINs
+        let mut joins = Vec::new();
+        while self.is_join_keyword() {
+            joins.push(self.parse_join()?);
+        }
+
         let selection = if self.match_token(&Token::Where) {
             Some(self.parse_expr()?)
         } else {
@@ -39,7 +45,7 @@ impl Parser {
         };
 
         let group_by = if self.match_token(&Token::Group) {
-            self.expect_token(&Token::By)?; // Expect BY after GROUP
+            self.expect_token(&Token::By)?;
             self.parse_expr_list()?
         } else {
             vec![]
@@ -52,7 +58,7 @@ impl Parser {
         };
 
         let order_by = if self.match_token(&Token::Order) {
-            self.expect_token(&Token::By)?; // Expect BY after ORDER
+            self.expect_token(&Token::By)?;
             self.parse_order_by()?
         } else {
             vec![]
@@ -73,6 +79,7 @@ impl Parser {
         Ok(Statement::Select(SelectStatement {
             projection,
             from,
+            joins,
             selection,
             group_by,
             having,
@@ -82,6 +89,69 @@ impl Parser {
         }))
     }
 
+    fn is_join_keyword(&self) -> bool {
+        matches!(
+            self.current_token(),
+            Token::Join | Token::Inner | Token::Left | Token::Right | Token::Full | Token::Cross
+        )
+    }
+
+    fn parse_join(&mut self) -> Result<Join> {
+        let join_type = self.parse_join_type()?;
+
+        // Expect JOIN keyword
+        self.expect_token(&Token::Join)?;
+
+        let right = self.parse_table_reference()?;
+
+        let on = if join_type != JoinType::Cross && self.match_token(&Token::On) {
+            Some(self.parse_expr()?)
+        } else {
+            None
+        };
+
+        Ok(Join {
+            join_type,
+            right,
+            on,
+        })
+    }
+
+    fn parse_join_type(&mut self) -> Result<JoinType> {
+        let join_type = match self.current_token() {
+            Token::Cross => {
+                self.advance();
+                JoinType::Cross
+            }
+            Token::Inner => {
+                self.advance();
+                JoinType::Inner
+            }
+            Token::Left => {
+                self.advance();
+                self.match_token(&Token::Outer); // OUTER is optional
+                JoinType::Left
+            }
+            Token::Right => {
+                self.advance();
+                self.match_token(&Token::Outer); // OUTER is optional
+                JoinType::Right
+            }
+            Token::Full => {
+                self.advance();
+                self.match_token(&Token::Outer); // OUTER is optional
+                JoinType::Full
+            }
+            Token::Join => {
+                // Don't advance, let parse_join handle it
+                JoinType::Inner // Default to INNER JOIN
+            }
+            _ => return Err(QueryError::ParseError("Expected JOIN keyword".to_string())),
+        };
+
+        Ok(join_type)
+    }
+
     fn parse_projection(&mut self) -> Result<Vec<SelectItem>> {
         let mut items = vec![];
 
@@ -89,6 +159,45 @@ impl Parser {
             if self.current_token() == &Token::Star {
                 self.advance();
                 items.push(SelectItem::Wildcard);
+            } else if let Token::Identifier(name) = self.current_token() {
+                let name_clone = name.clone();
+                self.advance();
+
+                // Check for qualified wildcard (table.*)
+                if self.match_token(&Token::Dot) {
+                    if self.match_token(&Token::Star) {
+                        items.push(SelectItem::QualifiedWildcard(name_clone));
+                        if !self.match_token(&Token::Comma) {
+                            break;
+                        }
+                        continue;
+                    } else {
+                        // Qualified column (table.column)
+                        let column = self.parse_identifier()?;
+                        let expr = Expr::QualifiedColumn {
+                            table: name_clone,
+                            column,
+                        };
+
+                        if self.match_token(&Token::As) {
+                            let alias = self.parse_identifier()?;
+                            items.push(SelectItem::ExprWithAlias { expr, alias });
+                        } else {
+                            items.push(SelectItem::UnnamedExpr(expr));
+                        }
+                    }
+                } else {
+                    // Regular column or expression
+                    self.position -= 1; // Go back to re-parse as expression
+                    let expr = self.parse_expr()?;
+
+                    if self.match_token(&Token::As) {
+                        let alias = self.parse_identifier()?;
+                        items.push(SelectItem::ExprWithAlias { expr, alias });
+                    } else {
+                        items.push(SelectItem::UnnamedExpr(expr));
+                    }
+                }
             } else {
                 let expr = self.parse_expr()?;
 
@@ -113,6 +222,11 @@ impl Parser {
 
         let alias = if self.match_token(&Token::As) {
             Some(self.parse_identifier()?)
+        } else if let Token::Identifier(id) = self.current_token() {
+            // Support implicit alias (without AS keyword)
+            let alias = id.clone();
+            self.advance();
+            Some(alias)
         } else {
             None
         };
@@ -234,7 +348,17 @@ impl Parser {
             Token::Identifier(id) => {
                 let name = id.clone();
                 self.advance();
-                Ok(Expr::Column(name))
+
+                // Check for qualified column (table.column)
+                if self.match_token(&Token::Dot) {
+                    let column = self.parse_identifier()?;
+                    Ok(Expr::QualifiedColumn {
+                        table: name,
+                        column,
+                    })
+                } else {
+                    Ok(Expr::Column(name))
+                }
             }
             Token::Count | Token::Sum | Token::Avg | Token::Min | Token::Max => {
                 self.parse_aggregate_function()

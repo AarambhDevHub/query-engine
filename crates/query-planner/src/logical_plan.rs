@@ -1,5 +1,5 @@
 use query_core::{DataType, Schema};
-use query_parser::{AggregateFunction, BinaryOperator, UnaryOperator};
+use query_parser::{AggregateFunction, BinaryOperator, JoinType, UnaryOperator};
 use std::sync::Arc;
 
 #[derive(Debug, Clone)]
@@ -17,6 +17,13 @@ pub enum LogicalPlan {
     Filter {
         input: Arc<LogicalPlan>,
         predicate: LogicalExpr,
+    },
+    Join {
+        left: Arc<LogicalPlan>,
+        right: Arc<LogicalPlan>,
+        join_type: JoinType,
+        on: Option<LogicalExpr>,
+        schema: Schema,
     },
     Aggregate {
         input: Arc<LogicalPlan>,
@@ -45,6 +52,7 @@ impl LogicalPlan {
             LogicalPlan::TableScan { schema, .. } => schema,
             LogicalPlan::Projection { schema, .. } => schema,
             LogicalPlan::Filter { input, .. } => input.schema(),
+            LogicalPlan::Join { schema, .. } => schema,
             LogicalPlan::Aggregate { schema, .. } => schema,
             LogicalPlan::Sort { input, .. } => input.schema(),
             LogicalPlan::Limit { input, .. } => input.schema(),

@@ -19,6 +19,7 @@ pub enum PhysicalPlan {
     Projection {
         input: Arc<PhysicalPlan>,
         exprs: Vec<PhysicalExpr>,
+        schema: Schema,
     },
     Filter {
         input: Arc<PhysicalPlan>,

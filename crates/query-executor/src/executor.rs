@@ -5,7 +5,7 @@ use arrow::compute::kernels::concat;
 use arrow::compute::kernels::filter::filter_record_batch;
 use arrow::datatypes::{DataType as ArrowDataType, Field as ArrowField, Schema as ArrowSchema};
 use arrow::record_batch::RecordBatch;
-use query_core::{QueryError, Result};
+use query_core::{QueryError, Result, Schema};
 use query_parser::JoinType;
 use std::sync::Arc;
 
@@ -27,9 +27,13 @@ impl QueryExecutor {
         Box::pin(async move {
             match plan {
                 PhysicalPlan::Scan { source, .. } => source.scan(),
-                PhysicalPlan::Projection { input, exprs } => {
+                PhysicalPlan::Projection {
+                    input,
+                    exprs,
+                    schema,
+                } => {
                     let input_batches = self.execute_plan(input).await?;
-                    self.execute_projection(input_batches, exprs)
+                    self.execute_projection(input_batches, exprs, schema)
                 }
                 PhysicalPlan::Filter { input, predicate } => {
                     let input_batches = self.execute_plan(input).await?;
@@ -73,6 +77,7 @@ impl QueryExecutor {
         &self,
         batches: Vec<RecordBatch>,
         exprs: &[crate::physical_plan::PhysicalExpr],
+        schema: &Schema,
     ) -> Result<Vec<RecordBatch>> {
         let mut result_batches = Vec::new();
 
@@ -88,16 +93,18 @@ impl QueryExecutor {
                 continue;
             }
 
-            let fields: Vec<ArrowField> = arrays
-                .iter()
-                .enumerate()
-                .map(|(i, array)| {
-                    ArrowField::new(format!("col_{}", i), array.data_type().clone(), true)
-                })
-                .collect();
+            // let fields: Vec<ArrowField> = arrays
+            //     .iter()
+            //     .enumerate()
+            //     .map(|(i, array)| {
+            //         ArrowField::new(format!("col_{}", i), array.data_type().clone(), true)
+            //     })
+            //     .collect();
 
-            let schema = Arc::new(ArrowSchema::new(fields));
-            let result_batch = RecordBatch::try_new(schema, arrays)?;
+            // let schema = Arc::new(ArrowSchema::new(fields));
+            let arrow_schema = Arc::new(schema.to_arrow());
+
+            let result_batch = RecordBatch::try_new(arrow_schema, arrays)?;
             result_batches.push(result_batch);
         }
 

@@ -4,6 +4,7 @@ use arrow::json::LineDelimitedWriter;
 use arrow::record_batch::RecordBatch;
 use colored::Colorize;
 use parquet::arrow::ArrowWriter;
+use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use parquet::file::properties::WriterProperties;
 use query_core::{DataType, Field, Schema};
 use query_parser::Parser;
@@ -232,19 +233,25 @@ pub async fn export_results(
             Arc::new(ParquetDataSource::new(input_path, schema.clone()))
         };
 
-    // Parse and plan query
+    // Parse SQL query
     let mut parser = Parser::new(sql)?;
     let statement = parser.parse()?;
 
+    // Create logical plan
     let mut planner = Planner::new();
     planner.register_table(table, schema.clone());
     let logical_plan = planner.create_logical_plan(&statement)?;
 
+    // Optimize logical plan
     let optimizer = Optimizer::new();
-    let _optimized_plan = optimizer.optimize(&logical_plan)?;
+    let optimized_plan = optimizer.optimize(&logical_plan)?;
 
-    // Execute query (simplified - would need full physical execution)
-    let batches = data_source.scan()?;
+    // Convert logical plan to physical plan
+    let physical_plan = logical_to_physical_plan(&optimized_plan, data_source.clone())?;
+
+    // Execute the physical plan with QueryExecutor
+    let executor = query_executor::QueryExecutor::new();
+    let batches = executor.execute(&physical_plan).await?;
 
     // Export results
     match format {
@@ -263,6 +270,131 @@ pub async fn export_results(
     Ok(())
 }
 
+// ✅ NEW: Helper function to convert logical plan to physical plan
+fn logical_to_physical_plan(
+    logical_plan: &query_planner::LogicalPlan,
+    data_source: Arc<dyn query_executor::physical_plan::DataSource>,
+) -> Result<query_executor::physical_plan::PhysicalPlan> {
+    use query_executor::physical_plan::PhysicalPlan;
+    use query_planner::{LogicalExpr, LogicalPlan};
+
+    match logical_plan {
+        LogicalPlan::TableScan { schema, .. } => Ok(PhysicalPlan::Scan {
+            source: data_source.clone(),
+            schema: schema.clone(),
+        }),
+        LogicalPlan::Filter { input, predicate } => {
+            let input_plan = logical_to_physical_plan(input, data_source)?;
+            let physical_predicate = logical_expr_to_physical(predicate)?;
+
+            Ok(PhysicalPlan::Filter {
+                input: Arc::new(input_plan),
+                predicate: physical_predicate,
+            })
+        }
+        LogicalPlan::Projection {
+            input,
+            exprs,
+            schema,
+        } => {
+            let input_plan = logical_to_physical_plan(input, data_source)?;
+            let physical_exprs: Result<Vec<_>> =
+                exprs.iter().map(logical_expr_to_physical).collect();
+
+            Ok(PhysicalPlan::Projection {
+                input: Arc::new(input_plan),
+                exprs: physical_exprs?,
+                schema: schema.clone(),
+            })
+        }
+        LogicalPlan::Limit { input, skip, fetch } => {
+            let input_plan = logical_to_physical_plan(input, data_source)?;
+
+            Ok(PhysicalPlan::Limit {
+                input: Arc::new(input_plan),
+                skip: *skip,
+                fetch: *fetch,
+            })
+        }
+        LogicalPlan::Sort {
+            input,
+            exprs,
+            ascending,
+        } => {
+            let input_plan = logical_to_physical_plan(input, data_source)?;
+            let physical_exprs: Result<Vec<_>> =
+                exprs.iter().map(logical_expr_to_physical).collect();
+
+            Ok(PhysicalPlan::Sort {
+                input: Arc::new(input_plan),
+                exprs: physical_exprs?,
+                ascending: ascending.clone(),
+            })
+        }
+        LogicalPlan::Aggregate {
+            input,
+            group_exprs,
+            aggr_exprs,
+            ..
+        } => {
+            let input_plan = logical_to_physical_plan(input, data_source)?;
+            let physical_group: Result<Vec<_>> =
+                group_exprs.iter().map(logical_expr_to_physical).collect();
+
+            let physical_aggr: Result<Vec<_>> = aggr_exprs
+                .iter()
+                .map(|expr| {
+                    if let LogicalExpr::AggregateFunction { func, expr: inner } = expr {
+                        Ok(query_executor::physical_plan::AggregateExpr {
+                            func: (*func).into(),
+                            expr: logical_expr_to_physical(inner)?,
+                        })
+                    } else {
+                        anyhow::bail!("Expected aggregate function")
+                    }
+                })
+                .collect();
+
+            Ok(PhysicalPlan::HashAggregate {
+                input: Arc::new(input_plan),
+                group_exprs: physical_group?,
+                aggr_exprs: physical_aggr?,
+            })
+        }
+        _ => anyhow::bail!("Unsupported logical plan type for export"),
+    }
+}
+
+// ✅ NEW: Helper function to convert logical expressions to physical expressions
+fn logical_expr_to_physical(
+    logical_expr: &query_planner::LogicalExpr,
+) -> Result<query_executor::physical_plan::PhysicalExpr> {
+    use query_executor::physical_plan::PhysicalExpr;
+    use query_planner::LogicalExpr;
+
+    match logical_expr {
+        LogicalExpr::Column { name, index } => Ok(PhysicalExpr::Column {
+            name: name.clone(),
+            index: *index,
+        }),
+        LogicalExpr::Literal(val) => Ok(PhysicalExpr::Literal(val.clone())),
+        LogicalExpr::BinaryExpr { left, op, right } => Ok(PhysicalExpr::BinaryExpr {
+            left: Box::new(logical_expr_to_physical(left)?),
+            op: (*op).into(),
+            right: Box::new(logical_expr_to_physical(right)?),
+        }),
+        LogicalExpr::UnaryExpr { op, expr } => Ok(PhysicalExpr::UnaryExpr {
+            op: (*op).into(),
+            expr: Box::new(logical_expr_to_physical(expr)?),
+        }),
+        LogicalExpr::Alias { expr, .. } => {
+            // For aliases, just convert the inner expression
+            logical_expr_to_physical(expr)
+        }
+        _ => anyhow::bail!("Unsupported logical expression type: {:?}", logical_expr),
+    }
+}
+
 fn infer_schema_from_file(file: &Path) -> Result<Schema> {
     let extension = file
         .extension()
@@ -273,24 +405,96 @@ fn infer_schema_from_file(file: &Path) -> Result<Schema> {
         "csv" => {
             let file_handle = File::open(file)?;
             let mut reader = csv::Reader::from_reader(file_handle);
-            let headers = reader.headers()?;
+            let headers = reader.headers()?.clone();
 
+            // ✅ Sample first 1000 rows to infer types
+            let mut sample_records: Vec<csv::StringRecord> = Vec::new();
+            for result in reader.records().take(1000) {
+                if let Ok(record) = result {
+                    sample_records.push(record);
+                }
+            }
+
+            // ✅ Infer data type for each column
             let fields: Vec<Field> = headers
                 .iter()
-                .map(|name| Field::new(name, DataType::Utf8, true))
+                .enumerate()
+                .map(|(col_idx, name)| {
+                    let inferred_type = infer_column_type_for_file(&sample_records, col_idx);
+                    Field::new(name, inferred_type, true)
+                })
                 .collect();
 
             Ok(Schema::new(fields))
         }
         "parquet" => {
             let file_handle = File::open(file)?;
-            let builder = parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(
-                file_handle,
-            )?;
+            let builder = ParquetRecordBatchReaderBuilder::try_new(file_handle)?;
             let arrow_schema = builder.schema();
             Ok(Schema::from_arrow(&arrow_schema))
         }
         _ => anyhow::bail!("Unsupported file format: {}", extension),
+    }
+}
+
+// ✅ NEW: Helper function for file schema inference
+fn infer_column_type_for_file(sample_records: &[csv::StringRecord], col_idx: usize) -> DataType {
+    use DataType::*;
+
+    let mut has_float = false;
+    let mut has_int = false;
+    let mut all_bool = true;
+    let mut all_numeric = true;
+    let mut non_empty_count = 0;
+
+    for record in sample_records {
+        if let Some(value) = record.get(col_idx) {
+            let trimmed = value.trim();
+
+            // Skip empty values
+            if trimmed.is_empty() {
+                continue;
+            }
+
+            non_empty_count += 1;
+
+            // Check if boolean
+            if !matches!(
+                trimmed.to_lowercase().as_str(),
+                "true" | "false" | "t" | "f" | "yes" | "no" | "1" | "0"
+            ) {
+                all_bool = false;
+            }
+
+            // Try to parse as number
+            if trimmed.parse::<i64>().is_ok() {
+                has_int = true;
+            } else if trimmed.parse::<f64>().is_ok() {
+                has_float = true;
+                has_int = false; // Has decimal point
+            } else {
+                all_numeric = false;
+            }
+        }
+    }
+
+    // Determine the most appropriate type
+    if non_empty_count == 0 {
+        return Utf8; // Default for empty columns
+    }
+
+    if all_numeric {
+        if has_float {
+            Float64
+        } else if has_int {
+            Int64
+        } else {
+            Utf8
+        }
+    } else if all_bool && non_empty_count > 2 {
+        Boolean
+    } else {
+        Utf8
     }
 }
 

@@ -1,0 +1,16 @@
+[package]
+name = "query-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+arrow.workspace = true
+parquet.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+ahash.workspace = true
+parking_lot.workspace = true

@@ -1,0 +1,12 @@
+[package]
+name = "query-planner"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+query-core = { path = "../query-core" }
+query-parser = { path = "../query-parser" }
+arrow.workspace = true

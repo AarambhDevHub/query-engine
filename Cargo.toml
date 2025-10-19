@@ -1,0 +1,43 @@
+[workspace]
+resolver = "2"
+members = ["crates/query-cli","crates/query-core", "crates/query-executor", "crates/query-parser", "crates/query-planner", "crates/query-storage", "examples-package"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["Darshan vichhi"]
+license = "Apache-2.0"
+repository = "https://github.com/AarambhDevHub/query-engine"
+
+[workspace.dependencies]
+# Core dependencies
+arrow = { version = "53.0", features = ["prettyprint"] }
+parquet = { version = "53.0", features = ["async"] }
+tokio = { version = "1.40", features = ["full"] }
+async-trait = "0.1"
+thiserror = "1.0"
+anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Performance
+rayon = "1.10"
+dashmap = "6.1"
+ahash = "0.8"
+parking_lot = "0.12"
+
+# Utilities
+tracing = "0.1"
+tracing-subscriber = "0.3"
+bytes = "1.7"
+futures = "0.3"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.bench]
+inherits = "release"

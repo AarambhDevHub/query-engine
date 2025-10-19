@@ -1,0 +1,15 @@
+[package]
+name = "query-storage"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+query-core = { path = "../query-core" }
+query-executor = { path = "../query-executor" }
+arrow.workspace = true
+parquet.workspace = true
+tokio.workspace = true
+async-trait.workspace = true

@@ -1,0 +1,25 @@
+[package]
+name = "query-engine-examples"
+version.workspace = true
+edition.workspace = true
+
+[[example]]
+name = "simple_query"
+
+[[example]]
+name = "aggregate_query"
+
+[[example]]
+name = "csv_query"
+
+[[example]]
+name = "full_query_demo"
+
+[dependencies]
+query-core = { path = "../crates/query-core" }
+query-parser = { path = "../crates/query-parser" }
+query-planner = { path = "../crates/query-planner" }
+query-executor = { path = "../crates/query-executor" }
+query-storage = { path = "../crates/query-storage" }
+tokio = { workspace = true }
+arrow = { workspace = true }

@@ -15,6 +15,10 @@ name = "csv_query"
 [[example]]
 name = "full_query_demo"
 
+
+[[example]]
+name = "join_query"
+
 [dependencies]
 query-core = { path = "../crates/query-core" }
 query-parser = { path = "../crates/query-parser" }

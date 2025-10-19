@@ -9,6 +9,7 @@ pub enum Statement {
 pub struct SelectStatement {
     pub projection: Vec<SelectItem>,
     pub from: Option<TableReference>,
+    pub joins: Vec<Join>,
     pub selection: Option<Expr>,
     pub group_by: Vec<Expr>,
     pub having: Option<Expr>,
@@ -20,6 +21,7 @@ pub struct SelectStatement {
 #[derive(Debug, Clone, PartialEq)]
 pub enum SelectItem {
     Wildcard,
+    QualifiedWildcard(String),
     UnnamedExpr(Expr),
     ExprWithAlias { expr: Expr, alias: String },
 }
@@ -31,8 +33,28 @@ pub struct TableReference {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct Join {
+    pub join_type: JoinType,
+    pub right: TableReference,
+    pub on: Option<Expr>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JoinType {
+    Inner,
+    Left,
+    Right,
+    Full,
+    Cross,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Column(String),
+    QualifiedColumn {
+        table: String,
+        column: String,
+    },
     Literal(Literal),
     BinaryOp {
         left: Box<Expr>,

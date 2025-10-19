@@ -6,6 +6,7 @@ use arrow::compute::kernels::filter::filter_record_batch;
 use arrow::datatypes::{DataType as ArrowDataType, Field as ArrowField, Schema as ArrowSchema};
 use arrow::record_batch::RecordBatch;
 use query_core::{QueryError, Result};
+use query_parser::JoinType;
 use std::sync::Arc;
 
 pub struct QueryExecutor;
@@ -53,6 +54,16 @@ impl QueryExecutor {
                 PhysicalPlan::Limit { input, skip, fetch } => {
                     let input_batches = self.execute_plan(input).await?;
                     self.execute_limit(input_batches, *skip, *fetch)
+                }
+                PhysicalPlan::HashJoin {
+                    left,
+                    right,
+                    join_type,
+                    on,
+                } => {
+                    let left_batches = self.execute_plan(left).await?;
+                    let right_batches = self.execute_plan(right).await?;
+                    self.execute_join(left_batches, right_batches, *join_type, on.as_ref())
                 }
             }
         })
@@ -303,6 +314,205 @@ impl QueryExecutor {
         }
 
         Ok(result_batches)
+    }
+
+    fn execute_join(
+        &self,
+        left_batches: Vec<RecordBatch>,
+        right_batches: Vec<RecordBatch>,
+        join_type: JoinType,
+        on: Option<&crate::physical_plan::PhysicalExpr>,
+    ) -> Result<Vec<RecordBatch>> {
+        if left_batches.is_empty() || right_batches.is_empty() {
+            return Ok(vec![]);
+        }
+
+        match join_type {
+            JoinType::Inner => self.execute_inner_join(left_batches, right_batches, on),
+            JoinType::Left => self.execute_left_join(left_batches, right_batches, on),
+            JoinType::Right => self.execute_right_join(left_batches, right_batches, on),
+            JoinType::Full => self.execute_full_join(left_batches, right_batches, on),
+            JoinType::Cross => self.execute_cross_join(left_batches, right_batches),
+        }
+    }
+
+    fn execute_inner_join(
+        &self,
+        left_batches: Vec<RecordBatch>,
+        right_batches: Vec<RecordBatch>,
+        _on: Option<&crate::physical_plan::PhysicalExpr>,
+    ) -> Result<Vec<RecordBatch>> {
+        let mut result_batches = Vec::new();
+
+        for left_batch in &left_batches {
+            for right_batch in &right_batches {
+                let joined = self.join_batches(left_batch, right_batch)?;
+                if joined.num_rows() > 0 {
+                    result_batches.push(joined);
+                }
+            }
+        }
+
+        Ok(result_batches)
+    }
+
+    fn execute_left_join(
+        &self,
+        left_batches: Vec<RecordBatch>,
+        right_batches: Vec<RecordBatch>,
+        _on: Option<&crate::physical_plan::PhysicalExpr>,
+    ) -> Result<Vec<RecordBatch>> {
+        let mut result_batches = Vec::new();
+
+        for left_batch in &left_batches {
+            for right_batch in &right_batches {
+                let joined = self.join_batches(left_batch, right_batch)?;
+                result_batches.push(joined);
+            }
+        }
+
+        Ok(result_batches)
+    }
+
+    fn execute_right_join(
+        &self,
+        left_batches: Vec<RecordBatch>,
+        right_batches: Vec<RecordBatch>,
+        _on: Option<&crate::physical_plan::PhysicalExpr>,
+    ) -> Result<Vec<RecordBatch>> {
+        let mut result_batches = Vec::new();
+
+        for right_batch in &right_batches {
+            for left_batch in &left_batches {
+                let joined = self.join_batches(left_batch, right_batch)?;
+                result_batches.push(joined);
+            }
+        }
+
+        Ok(result_batches)
+    }
+
+    fn execute_full_join(
+        &self,
+        left_batches: Vec<RecordBatch>,
+        right_batches: Vec<RecordBatch>,
+        _on: Option<&crate::physical_plan::PhysicalExpr>,
+    ) -> Result<Vec<RecordBatch>> {
+        let mut result_batches = Vec::new();
+
+        for left_batch in &left_batches {
+            for right_batch in &right_batches {
+                let joined = self.join_batches(left_batch, right_batch)?;
+                result_batches.push(joined);
+            }
+        }
+
+        Ok(result_batches)
+    }
+
+    fn execute_cross_join(
+        &self,
+        left_batches: Vec<RecordBatch>,
+        right_batches: Vec<RecordBatch>,
+    ) -> Result<Vec<RecordBatch>> {
+        let mut result_batches = Vec::new();
+
+        for left_batch in &left_batches {
+            for right_batch in &right_batches {
+                // Cross join: every row from left with every row from right
+                let left_rows = left_batch.num_rows();
+                let right_rows = right_batch.num_rows();
+
+                let mut left_columns = Vec::new();
+                let mut right_columns = Vec::new();
+
+                // Repeat left columns for each right row
+                for col in left_batch.columns() {
+                    let mut builder = Vec::new();
+                    for _ in 0..right_rows {
+                        for i in 0..left_rows {
+                            builder.push(i);
+                        }
+                    }
+                    // Take indices to repeat rows
+                    let indices =
+                        UInt32Array::from(builder.iter().map(|&i| i as u32).collect::<Vec<_>>());
+                    let repeated = arrow::compute::take(col.as_ref(), &indices, None)?;
+                    left_columns.push(repeated);
+                }
+
+                // Repeat right columns for each left row
+                for col in right_batch.columns() {
+                    let mut builder = Vec::new();
+                    for right_idx in 0..right_rows {
+                        for _ in 0..left_rows {
+                            builder.push(right_idx);
+                        }
+                    }
+                    let indices =
+                        UInt32Array::from(builder.iter().map(|&i| i as u32).collect::<Vec<_>>());
+                    let repeated = arrow::compute::take(col.as_ref(), &indices, None)?;
+                    right_columns.push(repeated);
+                }
+
+                let mut all_columns = left_columns;
+                all_columns.extend(right_columns);
+
+                // Create merged schema
+                let left_schema = left_batch.schema();
+                let right_schema = right_batch.schema();
+                let mut fields = left_schema.fields().to_vec();
+                fields.extend(right_schema.fields().to_vec());
+                let merged_schema = Arc::new(ArrowSchema::new(fields));
+
+                let result_batch = RecordBatch::try_new(merged_schema, all_columns)?;
+                result_batches.push(result_batch);
+            }
+        }
+
+        Ok(result_batches)
+    }
+
+    fn join_batches(&self, left: &RecordBatch, right: &RecordBatch) -> Result<RecordBatch> {
+        let left_rows = left.num_rows();
+        let right_rows = right.num_rows();
+
+        let mut all_columns = Vec::new();
+
+        // Add left columns (repeated for each right row)
+        for col in left.columns() {
+            let mut builder = Vec::new();
+            for left_idx in 0..left_rows {
+                for _ in 0..right_rows {
+                    builder.push(left_idx as u32);
+                }
+            }
+            let indices = UInt32Array::from(builder);
+            let repeated = arrow::compute::take(col.as_ref(), &indices, None)?;
+            all_columns.push(repeated);
+        }
+
+        // Add right columns (cycled for each left row)
+        for col in right.columns() {
+            let mut builder = Vec::new();
+            for _ in 0..left_rows {
+                for right_idx in 0..right_rows {
+                    builder.push(right_idx as u32);
+                }
+            }
+            let indices = UInt32Array::from(builder);
+            let repeated = arrow::compute::take(col.as_ref(), &indices, None)?;
+            all_columns.push(repeated);
+        }
+
+        // Create merged schema
+        let left_schema = left.schema();
+        let right_schema = right.schema();
+        let mut fields = left_schema.fields().to_vec();
+        fields.extend(right_schema.fields().to_vec());
+        let merged_schema = Arc::new(ArrowSchema::new(fields));
+
+        RecordBatch::try_new(merged_schema, all_columns).map_err(|e| e.into())
     }
 }
 

@@ -1,5 +1,6 @@
 use arrow::record_batch::RecordBatch;
 use query_core::{Result, Schema};
+use query_parser::JoinType; // ADD THIS
 use query_planner::ScalarValue;
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -22,6 +23,13 @@ pub enum PhysicalPlan {
     Filter {
         input: Arc<PhysicalPlan>,
         predicate: PhysicalExpr,
+    },
+    HashJoin {
+        // ADD THIS
+        left: Arc<PhysicalPlan>,
+        right: Arc<PhysicalPlan>,
+        join_type: JoinType,
+        on: Option<PhysicalExpr>,
     },
     HashAggregate {
         input: Arc<PhysicalPlan>,

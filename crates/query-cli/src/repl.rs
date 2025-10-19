@@ -408,6 +408,10 @@ impl Repl {
         println!("{}", "Aggregate Functions:".bright_yellow().bold());
         println!("  COUNT, SUM, AVG, MIN, MAX");
         println!();
+        println!("{}", "JOIN types:".bright_yellow().bold());
+        println!("  INNER, LEFT, RIGHT, FULL OUTER, CROSS");
+        println!("  Table aliases and qualified column names");
+        println!();
     }
 
     fn show_tables(&self) {

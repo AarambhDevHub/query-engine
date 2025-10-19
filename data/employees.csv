@@ -1,0 +1,7 @@
+id,name,age,salary,dept_id
+1,Alice,25,75000,101
+2,Bob,30,85000,102
+3,Charlie,35,95000,101
+4,Diana,28,80000,103
+5,Eve,32,90000,102
+6,Frank,29,78000,NULL

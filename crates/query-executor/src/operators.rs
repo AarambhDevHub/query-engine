@@ -1,4 +1,6 @@
-use crate::physical_plan::{AggregateFunction, BinaryOp, PhysicalExpr, UnaryOp};
+use crate::physical_plan::{
+    AggregateFunction, BinaryOp, PhysicalExpr, ScalarFunctionType, UnaryOp,
+};
 use arrow::array::*;
 use arrow::compute;
 use arrow::compute::kernels::cmp::{eq, gt, gt_eq, lt, lt_eq, neq};
@@ -55,6 +57,206 @@ pub fn evaluate_expr(expr: &PhysicalExpr, batch: &RecordBatch) -> Result<ArrayRe
                 "Window function execution not yet implemented".to_string(),
             ))
         }
+        PhysicalExpr::ScalarFunction { func, args } => evaluate_scalar_function(*func, args, batch),
+    }
+}
+
+fn evaluate_scalar_function(
+    func: ScalarFunctionType,
+    args: &[PhysicalExpr],
+    batch: &RecordBatch,
+) -> Result<ArrayRef> {
+    // Evaluate all arguments
+    let evaluated_args: Result<Vec<ArrayRef>> =
+        args.iter().map(|arg| evaluate_expr(arg, batch)).collect();
+    let evaluated_args = evaluated_args?;
+
+    match func {
+        ScalarFunctionType::Upper => {
+            let arg = evaluated_args.get(0).ok_or_else(|| {
+                QueryError::ExecutionError("UPPER requires 1 argument".to_string())
+            })?;
+            let string_array = arg.as_any().downcast_ref::<StringArray>().ok_or_else(|| {
+                QueryError::ExecutionError("UPPER requires string argument".to_string())
+            })?;
+            let result: StringArray = string_array
+                .iter()
+                .map(|opt| opt.map(|s| s.to_uppercase()))
+                .collect();
+            Ok(Arc::new(result) as ArrayRef)
+        }
+        ScalarFunctionType::Lower => {
+            let arg = evaluated_args.get(0).ok_or_else(|| {
+                QueryError::ExecutionError("LOWER requires 1 argument".to_string())
+            })?;
+            let string_array = arg.as_any().downcast_ref::<StringArray>().ok_or_else(|| {
+                QueryError::ExecutionError("LOWER requires string argument".to_string())
+            })?;
+            let result: StringArray = string_array
+                .iter()
+                .map(|opt| opt.map(|s| s.to_lowercase()))
+                .collect();
+            Ok(Arc::new(result) as ArrayRef)
+        }
+        ScalarFunctionType::Length => {
+            let arg = evaluated_args.get(0).ok_or_else(|| {
+                QueryError::ExecutionError("LENGTH requires 1 argument".to_string())
+            })?;
+            let string_array = arg.as_any().downcast_ref::<StringArray>().ok_or_else(|| {
+                QueryError::ExecutionError("LENGTH requires string argument".to_string())
+            })?;
+            let result: Int64Array = string_array
+                .iter()
+                .map(|opt| opt.map(|s| s.len() as i64))
+                .collect();
+            Ok(Arc::new(result) as ArrayRef)
+        }
+        ScalarFunctionType::Concat => {
+            if evaluated_args.is_empty() {
+                return Err(QueryError::ExecutionError(
+                    "CONCAT requires at least 1 argument".to_string(),
+                ));
+            }
+            let string_arrays: Result<Vec<&StringArray>> = evaluated_args
+                .iter()
+                .map(|a| {
+                    a.as_any().downcast_ref::<StringArray>().ok_or_else(|| {
+                        QueryError::ExecutionError("CONCAT requires string arguments".to_string())
+                    })
+                })
+                .collect();
+            let string_arrays = string_arrays?;
+
+            let len = string_arrays[0].len();
+            let result: StringArray = (0..len)
+                .map(|i| {
+                    let parts: Vec<&str> = string_arrays
+                        .iter()
+                        .filter_map(|arr| arr.value(i).into())
+                        .collect();
+                    if parts.is_empty() {
+                        None
+                    } else {
+                        Some(parts.join(""))
+                    }
+                })
+                .collect();
+            Ok(Arc::new(result) as ArrayRef)
+        }
+        ScalarFunctionType::Abs => {
+            let arg = evaluated_args
+                .get(0)
+                .ok_or_else(|| QueryError::ExecutionError("ABS requires 1 argument".to_string()))?;
+            if let Some(float_array) = arg.as_any().downcast_ref::<Float64Array>() {
+                let result: Float64Array =
+                    float_array.iter().map(|opt| opt.map(|v| v.abs())).collect();
+                Ok(Arc::new(result) as ArrayRef)
+            } else if let Some(int_array) = arg.as_any().downcast_ref::<Int64Array>() {
+                let result: Int64Array = int_array.iter().map(|opt| opt.map(|v| v.abs())).collect();
+                Ok(Arc::new(result) as ArrayRef)
+            } else {
+                Err(QueryError::ExecutionError(
+                    "ABS requires numeric argument".to_string(),
+                ))
+            }
+        }
+        ScalarFunctionType::Ceil => {
+            let arg = evaluated_args.get(0).ok_or_else(|| {
+                QueryError::ExecutionError("CEIL requires 1 argument".to_string())
+            })?;
+            let float_array = arg.as_any().downcast_ref::<Float64Array>().ok_or_else(|| {
+                QueryError::ExecutionError("CEIL requires float argument".to_string())
+            })?;
+            let result: Float64Array = float_array
+                .iter()
+                .map(|opt| opt.map(|v| v.ceil()))
+                .collect();
+            Ok(Arc::new(result) as ArrayRef)
+        }
+        ScalarFunctionType::Floor => {
+            let arg = evaluated_args.get(0).ok_or_else(|| {
+                QueryError::ExecutionError("FLOOR requires 1 argument".to_string())
+            })?;
+            let float_array = arg.as_any().downcast_ref::<Float64Array>().ok_or_else(|| {
+                QueryError::ExecutionError("FLOOR requires float argument".to_string())
+            })?;
+            let result: Float64Array = float_array
+                .iter()
+                .map(|opt| opt.map(|v| v.floor()))
+                .collect();
+            Ok(Arc::new(result) as ArrayRef)
+        }
+        ScalarFunctionType::Round => {
+            let arg = evaluated_args.get(0).ok_or_else(|| {
+                QueryError::ExecutionError("ROUND requires 1 argument".to_string())
+            })?;
+            let float_array = arg.as_any().downcast_ref::<Float64Array>().ok_or_else(|| {
+                QueryError::ExecutionError("ROUND requires float argument".to_string())
+            })?;
+            let result: Float64Array = float_array
+                .iter()
+                .map(|opt| opt.map(|v| v.round()))
+                .collect();
+            Ok(Arc::new(result) as ArrayRef)
+        }
+        ScalarFunctionType::Sqrt => {
+            let arg = evaluated_args.get(0).ok_or_else(|| {
+                QueryError::ExecutionError("SQRT requires 1 argument".to_string())
+            })?;
+            let float_array = arg.as_any().downcast_ref::<Float64Array>().ok_or_else(|| {
+                QueryError::ExecutionError("SQRT requires float argument".to_string())
+            })?;
+            let result: Float64Array = float_array
+                .iter()
+                .map(|opt| opt.map(|v| v.sqrt()))
+                .collect();
+            Ok(Arc::new(result) as ArrayRef)
+        }
+        ScalarFunctionType::Power => {
+            if evaluated_args.len() < 2 {
+                return Err(QueryError::ExecutionError(
+                    "POWER requires 2 arguments".to_string(),
+                ));
+            }
+            let base = evaluated_args[0]
+                .as_any()
+                .downcast_ref::<Float64Array>()
+                .ok_or_else(|| {
+                    QueryError::ExecutionError("POWER requires float arguments".to_string())
+                })?;
+            let exp = evaluated_args[1]
+                .as_any()
+                .downcast_ref::<Float64Array>()
+                .ok_or_else(|| {
+                    QueryError::ExecutionError("POWER requires float arguments".to_string())
+                })?;
+            let result: Float64Array = base
+                .iter()
+                .zip(exp.iter())
+                .map(|(b, e)| match (b, e) {
+                    (Some(b), Some(e)) => Some(b.powf(e)),
+                    _ => None,
+                })
+                .collect();
+            Ok(Arc::new(result) as ArrayRef)
+        }
+        ScalarFunctionType::Coalesce => {
+            if evaluated_args.is_empty() {
+                return Err(QueryError::ExecutionError(
+                    "COALESCE requires at least 1 argument".to_string(),
+                ));
+            }
+            // For simplicity, return the first non-null or first argument
+            Ok(evaluated_args.into_iter().next().unwrap())
+        }
+        // Placeholder implementations for remaining functions
+        ScalarFunctionType::Substring
+        | ScalarFunctionType::Trim
+        | ScalarFunctionType::Replace
+        | ScalarFunctionType::Nullif => Err(QueryError::ExecutionError(format!(
+            "{:?} function not yet fully implemented",
+            func
+        ))),
     }
 }
 

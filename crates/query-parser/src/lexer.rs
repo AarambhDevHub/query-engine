@@ -57,6 +57,24 @@ pub enum Token {
     Lead,
     FirstValue,
     LastValue,
+    // Built-in scalar functions - String
+    Upper,
+    Lower,
+    Length,
+    Concat,
+    Substring,
+    Trim,
+    Replace,
+    // Built-in scalar functions - Math
+    Abs,
+    Ceil,
+    Floor,
+    Round,
+    Sqrt,
+    Power,
+    // Built-in scalar functions - Null handling
+    Coalesce,
+    Nullif,
 
     // Operators
     Plus,
@@ -310,6 +328,24 @@ impl Lexer {
             "LEAD" => Token::Lead,
             "FIRST_VALUE" => Token::FirstValue,
             "LAST_VALUE" => Token::LastValue,
+            // Built-in scalar functions - String
+            "UPPER" => Token::Upper,
+            "LOWER" => Token::Lower,
+            "LENGTH" | "LEN" => Token::Length,
+            "CONCAT" => Token::Concat,
+            "SUBSTRING" | "SUBSTR" => Token::Substring,
+            "TRIM" => Token::Trim,
+            "REPLACE" => Token::Replace,
+            // Built-in scalar functions - Math
+            "ABS" => Token::Abs,
+            "CEIL" | "CEILING" => Token::Ceil,
+            "FLOOR" => Token::Floor,
+            "ROUND" => Token::Round,
+            "SQRT" => Token::Sqrt,
+            "POWER" | "POW" => Token::Power,
+            // Built-in scalar functions - Null handling
+            "COALESCE" => Token::Coalesce,
+            "NULLIF" => Token::Nullif,
             _ => Token::Identifier(ident),
         };
 

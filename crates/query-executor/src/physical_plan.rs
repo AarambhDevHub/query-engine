@@ -98,6 +98,11 @@ pub enum PhysicalExpr {
         partition_by: Vec<PhysicalExpr>,
         order_by: Vec<PhysicalExpr>,
     },
+    /// Scalar function expression
+    ScalarFunction {
+        func: ScalarFunctionType,
+        args: Vec<PhysicalExpr>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -158,6 +163,29 @@ pub struct WindowExpr {
     pub args: Vec<PhysicalExpr>,
     pub partition_by: Vec<PhysicalExpr>,
     pub order_by: Vec<PhysicalExpr>,
+}
+
+/// Physical scalar function types
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScalarFunctionType {
+    // String functions
+    Upper,
+    Lower,
+    Length,
+    Concat,
+    Substring,
+    Trim,
+    Replace,
+    // Math functions
+    Abs,
+    Ceil,
+    Floor,
+    Round,
+    Sqrt,
+    Power,
+    // Null handling
+    Coalesce,
+    Nullif,
 }
 
 impl From<query_parser::BinaryOperator> for BinaryOp {

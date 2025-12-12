@@ -13,6 +13,7 @@ A high-performance, production-ready SQL query engine built in Rust with Apache 
 - **🔗 JOIN Operations**: Full support for INNER, LEFT, RIGHT, FULL OUTER, and CROSS JOINs with table aliases
 - **📦 Subqueries & CTEs**: Common Table Expressions (WITH), scalar subqueries, IN/EXISTS subqueries, derived tables
 - **📈 Window Functions**: ROW_NUMBER, RANK, DENSE_RANK, LAG, LEAD with PARTITION BY and ORDER BY
+- **🔧 Scalar Functions**: Built-in UDFs: UPPER, LOWER, LENGTH, CONCAT, ABS, ROUND, SQRT, etc.
 - **📊 Aggregate Functions**: COUNT, SUM, AVG, MIN, MAX with GROUP BY support
 - **📁 Multiple Data Sources**: CSV, Parquet, and in-memory tables
 - **🎯 Query Optimization**: Predicate pushdown and logical plan optimization
@@ -671,7 +672,7 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 - [x] ~~JOIN operations (INNER, LEFT, RIGHT, FULL, CROSS)~~ ✅ **Completed!**
 - [x] ~~Subqueries and CTEs~~ ✅ **Completed!**
 - [x] ~~Window functions~~ ✅ **Completed!**
-- [ ] User-defined functions (UDFs)
+- [x] ~~User-defined functions (UDFs)~~ ✅ **Completed!**
 - [ ] Index support
 - [ ] Distributed execution
 - [ ] Query caching
@@ -686,7 +687,11 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 **Stability**: Alpha
 
 ### Recently Completed
-- ✅ **Window Functions** (NEW!)
+- ✅ **Scalar Functions (UDFs)** (NEW!)
+  - String: UPPER, LOWER, LENGTH, CONCAT, SUBSTRING, TRIM, REPLACE
+  - Math: ABS, CEIL, FLOOR, ROUND, SQRT, POWER
+  - Null handling: COALESCE, NULLIF
+- ✅ **Window Functions**
   - ROW_NUMBER, RANK, DENSE_RANK, NTILE
   - LAG, LEAD, FIRST_VALUE, LAST_VALUE
   - PARTITION BY and ORDER BY clauses

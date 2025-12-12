@@ -476,6 +476,22 @@ impl Planner {
                     order_by: order_by?,
                 })
             }
+            Expr::ScalarFunction { func, args } => {
+                let planned_args: Result<Vec<_>> = args
+                    .iter()
+                    .map(|a| {
+                        Ok(Box::new(self.create_logical_expr_with_context(
+                            a,
+                            schema,
+                            table_aliases,
+                        )?))
+                    })
+                    .collect();
+                Ok(LogicalExpr::ScalarFunction {
+                    func: *func,
+                    args: planned_args?,
+                })
+            }
         }
     }
 
@@ -619,6 +635,16 @@ impl Planner {
                     order_by: order_by?,
                 })
             }
+            Expr::ScalarFunction { func, args } => {
+                let planned_args: Result<Vec<_>> = args
+                    .iter()
+                    .map(|a| Ok(Box::new(self._create_logical_expr(a, schema)?)))
+                    .collect();
+                Ok(LogicalExpr::ScalarFunction {
+                    func: *func,
+                    args: planned_args?,
+                })
+            }
         }
     }
 
@@ -732,6 +758,30 @@ impl Planner {
                         // For simplicity, return Float64
                         Ok(DataType::Float64)
                     }
+                }
+            }
+            LogicalExpr::ScalarFunction { func, .. } => {
+                // Determine return type based on function
+                use query_parser::ScalarFunction;
+                match func {
+                    // String functions return Utf8
+                    ScalarFunction::Upper
+                    | ScalarFunction::Lower
+                    | ScalarFunction::Concat
+                    | ScalarFunction::Substring
+                    | ScalarFunction::Trim
+                    | ScalarFunction::Replace => Ok(DataType::Utf8),
+                    // Length returns Int64
+                    ScalarFunction::Length => Ok(DataType::Int64),
+                    // Math functions return Float64
+                    ScalarFunction::Abs
+                    | ScalarFunction::Ceil
+                    | ScalarFunction::Floor
+                    | ScalarFunction::Round
+                    | ScalarFunction::Sqrt
+                    | ScalarFunction::Power => Ok(DataType::Float64),
+                    // Null handling - varies by argument
+                    ScalarFunction::Coalesce | ScalarFunction::Nullif => Ok(DataType::Utf8),
                 }
             }
         }

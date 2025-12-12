@@ -4,7 +4,7 @@ use query_planner::{Optimizer, Planner};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("=== Subqueries and CTEs Example ===\n");
+    println!("=== Window Functions Example ===\n");
 
     // Create sample schema for testing
     let employees_schema = Schema::new(vec![
@@ -12,42 +12,44 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Field::new("name", DataType::Utf8, false),
         Field::new("dept_id", DataType::Int64, false),
         Field::new("salary", DataType::Float64, false),
+        Field::new("hire_date", DataType::Utf8, false),
     ]);
 
-    let departments_schema = Schema::new(vec![
-        Field::new("dept_id", DataType::Int64, false),
-        Field::new("dept_name", DataType::Utf8, false),
-        Field::new("location", DataType::Utf8, false),
-    ]);
+    println!("Employees Schema: {:?}\n", employees_schema);
 
-    println!("Employees Schema: {:?}", employees_schema);
-    println!("Departments Schema: {:?}\n", departments_schema);
-
-    // Test queries demonstrating new capabilities
+    // Test queries demonstrating window functions
     let test_queries = vec![
         (
-            "Simple CTE",
-            "WITH eng AS (SELECT id, name, salary FROM employees) SELECT name, salary FROM eng",
+            "ROW_NUMBER() with ORDER BY",
+            "SELECT name, salary, ROW_NUMBER() OVER (ORDER BY salary DESC) FROM employees",
         ),
         (
-            "CTE with alias",
-            "WITH high_salary AS (SELECT name, salary FROM employees) SELECT * FROM high_salary AS hs",
+            "RANK() with PARTITION BY",
+            "SELECT name, dept_id, salary, RANK() OVER (PARTITION BY dept_id ORDER BY salary DESC) FROM employees",
         ),
         (
-            "Subquery in FROM clause",
-            "SELECT sub.name FROM (SELECT id, name FROM employees) AS sub",
+            "DENSE_RANK()",
+            "SELECT name, salary, DENSE_RANK() OVER (ORDER BY salary DESC) FROM employees",
         ),
         (
-            "Scalar subquery (parsing only)",
-            "SELECT name, (SELECT MAX(salary) FROM employees) AS max_sal FROM employees",
+            "LAG() - previous row value",
+            "SELECT name, salary, LAG(salary, 1) OVER (ORDER BY hire_date) FROM employees",
         ),
         (
-            "IN subquery (parsing only)",
-            "SELECT name FROM employees WHERE dept_id IN (SELECT dept_id FROM departments)",
+            "LEAD() - next row value",
+            "SELECT name, salary, LEAD(salary, 1) OVER (ORDER BY hire_date) FROM employees",
         ),
         (
-            "EXISTS subquery (parsing only)",
-            "SELECT dept_name FROM departments WHERE EXISTS (SELECT 1 FROM employees)",
+            "FIRST_VALUE() in partition",
+            "SELECT name, dept_id, FIRST_VALUE(name) OVER (PARTITION BY dept_id ORDER BY salary DESC) FROM employees",
+        ),
+        (
+            "LAST_VALUE() in partition",
+            "SELECT name, dept_id, LAST_VALUE(name) OVER (PARTITION BY dept_id ORDER BY salary DESC) FROM employees",
+        ),
+        (
+            "Multiple window functions",
+            "SELECT name, salary, ROW_NUMBER() OVER (ORDER BY salary), RANK() OVER (ORDER BY salary) FROM employees",
         ),
     ];
 
@@ -65,10 +67,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     let mut planner = Planner::new();
                     planner.register_table("employees", employees_schema.clone());
-                    planner.register_table("departments", departments_schema.clone());
-                    // Register CTE names as virtual tables for planning
-                    planner.register_table("eng", employees_schema.clone());
-                    planner.register_table("high_salary", employees_schema.clone());
 
                     match planner.create_logical_plan(&statement) {
                         Ok(logical_plan) => {
@@ -94,9 +92,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     println!("\n{}", "=".repeat(80));
-    println!("Subqueries and CTEs Demo completed!");
-    println!("\nNote: Full execution of scalar/IN/EXISTS subqueries requires additional");
-    println!("async context integration which is scaffolded but not fully implemented.");
+    println!("Window Functions Demo completed!");
+    println!(
+        "\nSupported functions: ROW_NUMBER, RANK, DENSE_RANK, NTILE, LAG, LEAD, FIRST_VALUE, LAST_VALUE"
+    );
+    println!("Supported clauses: PARTITION BY, ORDER BY, ROWS/RANGE BETWEEN");
 
     Ok(())
 }

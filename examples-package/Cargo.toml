@@ -22,6 +22,9 @@ name = "join_query"
 [[example]]
 name = "subquery_cte_query"
 
+[[example]]
+name = "window_function_query"
+
 [dependencies]
 query-core = { path = "../crates/query-core" }
 query-parser = { path = "../crates/query-parser" }

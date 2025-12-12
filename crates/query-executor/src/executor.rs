@@ -73,6 +73,11 @@ impl QueryExecutor {
                     // Execute the subquery and return its results
                     self.execute_plan(subquery).await
                 }
+                PhysicalPlan::Window { input, .. } => {
+                    // Window function execution - for now, just pass through input
+                    // Full implementation would compute window function results
+                    self.execute_plan(input).await
+                }
             }
         })
     }

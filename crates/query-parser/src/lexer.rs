@@ -39,6 +39,24 @@ pub enum Token {
     With,
     Recursive,
     Exists,
+    // Window function keywords
+    Over,
+    Partition,
+    Rows,
+    Range,
+    Unbounded,
+    Preceding,
+    Following,
+    Current,
+    // Window function names
+    RowNumber,
+    Rank,
+    DenseRank,
+    Ntile,
+    Lag,
+    Lead,
+    FirstValue,
+    LastValue,
 
     // Operators
     Plus,
@@ -274,6 +292,24 @@ impl Lexer {
             "WITH" => Token::With,
             "RECURSIVE" => Token::Recursive,
             "EXISTS" => Token::Exists,
+            // Window function keywords
+            "OVER" => Token::Over,
+            "PARTITION" => Token::Partition,
+            "ROWS" => Token::Rows,
+            "RANGE" => Token::Range,
+            "UNBOUNDED" => Token::Unbounded,
+            "PRECEDING" => Token::Preceding,
+            "FOLLOWING" => Token::Following,
+            "CURRENT" => Token::Current,
+            // Window function names
+            "ROW_NUMBER" => Token::RowNumber,
+            "RANK" => Token::Rank,
+            "DENSE_RANK" => Token::DenseRank,
+            "NTILE" => Token::Ntile,
+            "LAG" => Token::Lag,
+            "LEAD" => Token::Lead,
+            "FIRST_VALUE" => Token::FirstValue,
+            "LAST_VALUE" => Token::LastValue,
             _ => Token::Identifier(ident),
         };
 

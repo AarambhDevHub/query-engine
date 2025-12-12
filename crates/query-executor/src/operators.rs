@@ -48,6 +48,13 @@ pub fn evaluate_expr(expr: &PhysicalExpr, batch: &RecordBatch) -> Result<ArrayRe
                 "EXISTS subquery execution not yet implemented in synchronous context".to_string(),
             ))
         }
+        PhysicalExpr::WindowFunction { .. } => {
+            // Window function evaluation requires full batch context
+            // This is handled at the plan level, not expression level
+            Err(QueryError::ExecutionError(
+                "Window function execution not yet implemented".to_string(),
+            ))
+        }
     }
 }
 

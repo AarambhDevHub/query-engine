@@ -523,6 +523,15 @@ impl Parser {
             Token::Count | Token::Sum | Token::Avg | Token::Min | Token::Max => {
                 self.parse_aggregate_function()
             }
+            // Window functions
+            Token::RowNumber
+            | Token::Rank
+            | Token::DenseRank
+            | Token::Ntile
+            | Token::Lag
+            | Token::Lead
+            | Token::FirstValue
+            | Token::LastValue => self.parse_window_function(),
             Token::LeftParen => {
                 self.advance();
                 // Check if this is a scalar subquery
@@ -607,6 +616,141 @@ impl Parser {
         }
 
         Ok(order_by)
+    }
+
+    /// Parse a window function: func(...) OVER (...)
+    fn parse_window_function(&mut self) -> Result<Expr> {
+        let func = match self.current_token() {
+            Token::RowNumber => WindowFunctionType::RowNumber,
+            Token::Rank => WindowFunctionType::Rank,
+            Token::DenseRank => WindowFunctionType::DenseRank,
+            Token::Ntile => WindowFunctionType::Ntile,
+            Token::Lag => WindowFunctionType::Lag,
+            Token::Lead => WindowFunctionType::Lead,
+            Token::FirstValue => WindowFunctionType::FirstValue,
+            Token::LastValue => WindowFunctionType::LastValue,
+            _ => {
+                return Err(QueryError::ParseError(
+                    "Expected window function".to_string(),
+                ));
+            }
+        };
+        self.advance();
+
+        // Parse function arguments
+        self.expect_token(&Token::LeftParen)?;
+        let args = if self.current_token() != &Token::RightParen {
+            self.parse_expr_list()?
+        } else {
+            vec![]
+        };
+        self.expect_token(&Token::RightParen)?;
+
+        // Parse OVER clause
+        self.expect_token(&Token::Over)?;
+        let over = self.parse_window_spec()?;
+
+        Ok(Expr::WindowFunction { func, args, over })
+    }
+
+    /// Parse window specification: OVER (PARTITION BY ... ORDER BY ... [ROWS/RANGE ...])
+    fn parse_window_spec(&mut self) -> Result<WindowSpec> {
+        self.expect_token(&Token::LeftParen)?;
+
+        // Parse PARTITION BY
+        let partition_by = if self.match_token(&Token::Partition) {
+            self.expect_token(&Token::By)?;
+            self.parse_expr_list()?
+        } else {
+            vec![]
+        };
+
+        // Parse ORDER BY
+        let order_by = if self.match_token(&Token::Order) {
+            self.expect_token(&Token::By)?;
+            self.parse_order_by()?
+        } else {
+            vec![]
+        };
+
+        // Parse optional window frame (ROWS/RANGE ...)
+        let frame = if self.current_token() == &Token::Rows || self.current_token() == &Token::Range
+        {
+            Some(self.parse_window_frame()?)
+        } else {
+            None
+        };
+
+        self.expect_token(&Token::RightParen)?;
+
+        Ok(WindowSpec {
+            partition_by,
+            order_by,
+            frame,
+        })
+    }
+
+    /// Parse window frame: ROWS/RANGE [BETWEEN] frame_bound [AND frame_bound]
+    fn parse_window_frame(&mut self) -> Result<WindowFrame> {
+        let mode = if self.match_token(&Token::Rows) {
+            WindowFrameMode::Rows
+        } else if self.match_token(&Token::Range) {
+            WindowFrameMode::Range
+        } else {
+            return Err(QueryError::ParseError("Expected ROWS or RANGE".to_string()));
+        };
+
+        // Check for BETWEEN
+        let has_between = self.match_token(&Token::Between);
+
+        let start = self.parse_window_frame_bound()?;
+
+        let end = if has_between {
+            self.expect_token(&Token::And)?;
+            Some(self.parse_window_frame_bound()?)
+        } else {
+            None
+        };
+
+        Ok(WindowFrame { mode, start, end })
+    }
+
+    /// Parse window frame bound: UNBOUNDED PRECEDING/FOLLOWING | n PRECEDING/FOLLOWING | CURRENT ROW
+    fn parse_window_frame_bound(&mut self) -> Result<WindowFrameBound> {
+        if self.match_token(&Token::Unbounded) {
+            if self.match_token(&Token::Preceding) {
+                Ok(WindowFrameBound::Preceding(None))
+            } else if self.match_token(&Token::Following) {
+                Ok(WindowFrameBound::Following(None))
+            } else {
+                Err(QueryError::ParseError(
+                    "Expected PRECEDING or FOLLOWING after UNBOUNDED".to_string(),
+                ))
+            }
+        } else if self.match_token(&Token::Current) {
+            // Consume ROW token if present (can be separate Row token or part of identifier)
+            if let Token::Identifier(id) = self.current_token() {
+                if id.to_uppercase() == "ROW" {
+                    self.advance();
+                }
+            }
+            Ok(WindowFrameBound::CurrentRow)
+        } else if let Token::Number(_) = self.current_token() {
+            let n = self.parse_number()?;
+            if self.match_token(&Token::Preceding) {
+                Ok(WindowFrameBound::Preceding(Some(n)))
+            } else if self.match_token(&Token::Following) {
+                Ok(WindowFrameBound::Following(Some(n)))
+            } else {
+                Err(QueryError::ParseError(
+                    "Expected PRECEDING or FOLLOWING after number".to_string(),
+                ))
+            }
+        } else {
+            Err(QueryError::ParseError(
+                "Invalid window frame bound".to_string(),
+            ))
+        }
     }
 
     fn parse_identifier(&mut self) -> Result<String> {

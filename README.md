@@ -12,6 +12,7 @@ A high-performance, production-ready SQL query engine built in Rust with Apache 
 - **🔍 SQL Support**: Comprehensive SQL syntax including SELECT, WHERE, GROUP BY, ORDER BY, LIMIT, and JOINs
 - **🔗 JOIN Operations**: Full support for INNER, LEFT, RIGHT, FULL OUTER, and CROSS JOINs with table aliases
 - **📦 Subqueries & CTEs**: Common Table Expressions (WITH), scalar subqueries, IN/EXISTS subqueries, derived tables
+- **📈 Window Functions**: ROW_NUMBER, RANK, DENSE_RANK, LAG, LEAD with PARTITION BY and ORDER BY
 - **📊 Aggregate Functions**: COUNT, SUM, AVG, MIN, MAX with GROUP BY support
 - **📁 Multiple Data Sources**: CSV, Parquet, and in-memory tables
 - **🎯 Query Optimization**: Predicate pushdown and logical plan optimization
@@ -669,7 +670,7 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 - [x] ~~JOIN operations (INNER, LEFT, RIGHT, FULL, CROSS)~~ ✅ **Completed!**
 - [x] ~~Subqueries and CTEs~~ ✅ **Completed!**
-- [ ] Window functions
+- [x] ~~Window functions~~ ✅ **Completed!**
 - [ ] User-defined functions (UDFs)
 - [ ] Index support
 - [ ] Distributed execution
@@ -685,7 +686,12 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 **Stability**: Alpha
 
 ### Recently Completed
-- ✅ **Subqueries and CTEs** (NEW!)
+- ✅ **Window Functions** (NEW!)
+  - ROW_NUMBER, RANK, DENSE_RANK, NTILE
+  - LAG, LEAD, FIRST_VALUE, LAST_VALUE
+  - PARTITION BY and ORDER BY clauses
+  - Window frame specifications (ROWS/RANGE BETWEEN)
+- ✅ **Subqueries and CTEs**
   - Common Table Expressions with `WITH ... AS (...)`
   - Subqueries in FROM clause (derived tables)
   - Scalar subqueries in SELECT

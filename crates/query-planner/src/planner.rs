@@ -448,6 +448,34 @@ impl Planner {
                     negated: *negated,
                 })
             }
+            Expr::WindowFunction { func, args, over } => {
+                let planned_args: Result<Vec<_>> = args
+                    .iter()
+                    .map(|a| {
+                        Ok(Box::new(self.create_logical_expr_with_context(
+                            a,
+                            schema,
+                            table_aliases,
+                        )?))
+                    })
+                    .collect();
+                let partition_by: Result<Vec<_>> = over
+                    .partition_by
+                    .iter()
+                    .map(|e| self.create_logical_expr_with_context(e, schema, table_aliases))
+                    .collect();
+                let order_by: Result<Vec<_>> = over
+                    .order_by
+                    .iter()
+                    .map(|o| self.create_logical_expr_with_context(&o.expr, schema, table_aliases))
+                    .collect();
+                Ok(LogicalExpr::WindowFunction {
+                    func: *func,
+                    args: planned_args?,
+                    partition_by: partition_by?,
+                    order_by: order_by?,
+                })
+            }
         }
     }
 
@@ -569,6 +597,28 @@ impl Planner {
                     negated: *negated,
                 })
             }
+            Expr::WindowFunction { func, args, over } => {
+                let planned_args: Result<Vec<_>> = args
+                    .iter()
+                    .map(|a| Ok(Box::new(self._create_logical_expr(a, schema)?)))
+                    .collect();
+                let partition_by: Result<Vec<_>> = over
+                    .partition_by
+                    .iter()
+                    .map(|e| self._create_logical_expr(e, schema))
+                    .collect();
+                let order_by: Result<Vec<_>> = over
+                    .order_by
+                    .iter()
+                    .map(|o| self._create_logical_expr(&o.expr, schema))
+                    .collect();
+                Ok(LogicalExpr::WindowFunction {
+                    func: *func,
+                    args: planned_args?,
+                    partition_by: partition_by?,
+                    order_by: order_by?,
+                })
+            }
         }
     }
 
@@ -666,6 +716,24 @@ impl Planner {
             }
             LogicalExpr::InSubquery { .. } => Ok(DataType::Boolean),
             LogicalExpr::Exists { .. } => Ok(DataType::Boolean),
+            LogicalExpr::WindowFunction { func, .. } => {
+                // Most window functions return Int64 or Float64
+                use query_parser::WindowFunctionType;
+                match func {
+                    WindowFunctionType::RowNumber
+                    | WindowFunctionType::Rank
+                    | WindowFunctionType::DenseRank
+                    | WindowFunctionType::Ntile => Ok(DataType::Int64),
+                    WindowFunctionType::Lag
+                    | WindowFunctionType::Lead
+                    | WindowFunctionType::FirstValue
+                    | WindowFunctionType::LastValue => {
+                        // These return the same type as their argument
+                        // For simplicity, return Float64
+                        Ok(DataType::Float64)
+                    }
+                }
+            }
         }
     }
 

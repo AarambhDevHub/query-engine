@@ -52,6 +52,12 @@ pub enum PhysicalPlan {
         subquery: Arc<PhysicalPlan>,
         schema: Schema,
     },
+    /// Window function computation
+    Window {
+        input: Arc<PhysicalPlan>,
+        window_exprs: Vec<WindowExpr>,
+        schema: Schema,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -84,6 +90,13 @@ pub enum PhysicalExpr {
     Exists {
         plan: Arc<PhysicalPlan>,
         negated: bool,
+    },
+    /// Window function expression
+    WindowFunction {
+        func: WindowFunctionType,
+        args: Vec<PhysicalExpr>,
+        partition_by: Vec<PhysicalExpr>,
+        order_by: Vec<PhysicalExpr>,
     },
 }
 
@@ -123,6 +136,28 @@ pub enum AggregateFunction {
     Avg,
     Min,
     Max,
+}
+
+/// Physical window function types
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowFunctionType {
+    RowNumber,
+    Rank,
+    DenseRank,
+    Ntile,
+    Lag,
+    Lead,
+    FirstValue,
+    LastValue,
+}
+
+/// Physical window expression
+#[derive(Debug, Clone)]
+pub struct WindowExpr {
+    pub func: WindowFunctionType,
+    pub args: Vec<PhysicalExpr>,
+    pub partition_by: Vec<PhysicalExpr>,
+    pub order_by: Vec<PhysicalExpr>,
 }
 
 impl From<query_parser::BinaryOperator> for BinaryOp {

@@ -1,5 +1,7 @@
 use query_core::{DataType, Schema};
-use query_parser::{AggregateFunction, BinaryOperator, JoinType, UnaryOperator};
+use query_parser::{
+    AggregateFunction, BinaryOperator, JoinType, UnaryOperator, WindowFunctionType,
+};
 use std::sync::Arc;
 
 #[derive(Debug, Clone)]
@@ -50,6 +52,12 @@ pub enum LogicalPlan {
         alias: String,
         schema: Schema,
     },
+    /// Window function computation
+    Window {
+        input: Arc<LogicalPlan>,
+        window_exprs: Vec<LogicalExpr>,
+        schema: Schema,
+    },
 }
 
 impl LogicalPlan {
@@ -64,6 +72,7 @@ impl LogicalPlan {
             LogicalPlan::Limit { input, .. } => input.schema(),
             LogicalPlan::EmptyRelation { schema } => schema,
             LogicalPlan::SubqueryScan { schema, .. } => schema,
+            LogicalPlan::Window { schema, .. } => schema,
         }
     }
 }
@@ -108,6 +117,13 @@ pub enum LogicalExpr {
     Exists {
         subquery: Arc<LogicalPlan>,
         negated: bool,
+    },
+    /// Window function expression
+    WindowFunction {
+        func: WindowFunctionType,
+        args: Vec<Box<LogicalExpr>>,
+        partition_by: Vec<LogicalExpr>,
+        order_by: Vec<LogicalExpr>,
     },
 }
 

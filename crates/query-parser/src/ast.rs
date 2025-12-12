@@ -110,6 +110,12 @@ pub enum Expr {
         subquery: Box<SelectStatement>,
         negated: bool,
     },
+    /// Window function: func(...) OVER (...)
+    WindowFunction {
+        func: WindowFunctionType,
+        args: Vec<Expr>,
+        over: WindowSpec,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -156,4 +162,46 @@ pub enum AggregateFunction {
 pub struct OrderByExpr {
     pub expr: Expr,
     pub asc: bool,
+}
+
+/// Window function types
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowFunctionType {
+    RowNumber,
+    Rank,
+    DenseRank,
+    Ntile,
+    Lag,
+    Lead,
+    FirstValue,
+    LastValue,
+}
+
+/// Window specification: OVER (PARTITION BY ... ORDER BY ... [frame])
+#[derive(Debug, Clone, PartialEq)]
+pub struct WindowSpec {
+    pub partition_by: Vec<Expr>,
+    pub order_by: Vec<OrderByExpr>,
+    pub frame: Option<WindowFrame>,
+}
+
+/// Window frame: ROWS/RANGE BETWEEN ... AND ...
+#[derive(Debug, Clone, PartialEq)]
+pub struct WindowFrame {
+    pub mode: WindowFrameMode,
+    pub start: WindowFrameBound,
+    pub end: Option<WindowFrameBound>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowFrameMode {
+    Rows,
+    Range,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum WindowFrameBound {
+    CurrentRow,
+    Preceding(Option<usize>), // None = UNBOUNDED
+    Following(Option<usize>), // None = UNBOUNDED
 }

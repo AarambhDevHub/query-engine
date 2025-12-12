@@ -69,6 +69,10 @@ impl QueryExecutor {
                     let right_batches = self.execute_plan(right).await?;
                     self.execute_join(left_batches, right_batches, *join_type, on.as_ref())
                 }
+                PhysicalPlan::SubqueryScan { subquery, .. } => {
+                    // Execute the subquery and return its results
+                    self.execute_plan(subquery).await
+                }
             }
         })
     }

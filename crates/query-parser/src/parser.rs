@@ -18,10 +18,72 @@ impl Parser {
     }
 
     pub fn parse(&mut self) -> Result<Statement> {
+        // Check for WITH clause (CTE)
+        if self.current_token() == &Token::With {
+            return self.parse_with_statement();
+        }
         self.parse_select()
     }
 
+    /// Parse WITH clause: WITH [RECURSIVE] cte_name [(col1, ...)] AS (SELECT ...), ...
+    fn parse_with_statement(&mut self) -> Result<Statement> {
+        self.expect_token(&Token::With)?;
+
+        let recursive = self.match_token(&Token::Recursive);
+        let mut ctes = Vec::new();
+
+        loop {
+            let name = self.parse_identifier()?;
+
+            // Optional column list: WITH cte_name (col1, col2) AS (...)
+            let columns = if self.match_token(&Token::LeftParen) {
+                let mut cols = Vec::new();
+                loop {
+                    cols.push(self.parse_identifier()?);
+                    if !self.match_token(&Token::Comma) {
+                        break;
+                    }
+                }
+                self.expect_token(&Token::RightParen)?;
+                Some(cols)
+            } else {
+                None
+            };
+
+            self.expect_token(&Token::As)?;
+            self.expect_token(&Token::LeftParen)?;
+
+            // Parse the CTE query
+            let query = Box::new(self.parse_select_statement()?);
+
+            self.expect_token(&Token::RightParen)?;
+
+            ctes.push(CteDefinition {
+                name,
+                columns,
+                query,
+            });
+
+            if !self.match_token(&Token::Comma) {
+                break;
+            }
+        }
+
+        // Now parse the main SELECT
+        let select = self.parse_select_statement()?;
+
+        Ok(Statement::WithSelect {
+            with: WithClause { recursive, ctes },
+            select,
+        })
+    }
+
     fn parse_select(&mut self) -> Result<Statement> {
+        Ok(Statement::Select(self.parse_select_statement()?))
+    }
+
+    /// Parse a SELECT statement (without wrapping in Statement enum)
+    fn parse_select_statement(&mut self) -> Result<SelectStatement> {
         self.expect_token(&Token::Select)?;
 
         let projection = self.parse_projection()?;
@@ -76,7 +138,7 @@ impl Parser {
             None
         };
 
-        Ok(Statement::Select(SelectStatement {
+        Ok(SelectStatement {
             projection,
             from,
             joins,
@@ -86,7 +148,7 @@ impl Parser {
             order_by,
             limit,
             offset,
-        }))
+        })
     }
 
     fn is_join_keyword(&self) -> bool {
@@ -218,20 +280,72 @@ impl Parser {
     }
 
     fn parse_table_reference(&mut self) -> Result<TableReference> {
+        // Check for subquery: (SELECT ...) AS alias
+        if self.match_token(&Token::LeftParen) {
+            let query = Box::new(self.parse_select_statement()?);
+            self.expect_token(&Token::RightParen)?;
+
+            // Subquery requires an alias
+            let alias = if self.match_token(&Token::As) {
+                self.parse_identifier()?
+            } else if let Token::Identifier(id) = self.current_token() {
+                let alias = id.clone();
+                self.advance();
+                alias
+            } else {
+                return Err(QueryError::ParseError(
+                    "Subquery in FROM clause requires an alias".to_string(),
+                ));
+            };
+
+            return Ok(TableReference::Subquery { query, alias });
+        }
+
+        // Simple table reference
         let name = self.parse_identifier()?;
 
         let alias = if self.match_token(&Token::As) {
             Some(self.parse_identifier()?)
         } else if let Token::Identifier(id) = self.current_token() {
             // Support implicit alias (without AS keyword)
-            let alias = id.clone();
-            self.advance();
-            Some(alias)
+            // But be careful not to consume keywords
+            if !self.is_keyword(self.current_token()) {
+                let alias = id.clone();
+                self.advance();
+                Some(alias)
+            } else {
+                None
+            }
         } else {
             None
         };
 
-        Ok(TableReference { name, alias })
+        Ok(TableReference::Table { name, alias })
+    }
+
+    /// Check if token is a reserved keyword (not a valid alias)
+    fn is_keyword(&self, token: &Token) -> bool {
+        matches!(
+            token,
+            Token::Select
+                | Token::From
+                | Token::Where
+                | Token::Join
+                | Token::Inner
+                | Token::Left
+                | Token::Right
+                | Token::Full
+                | Token::Cross
+                | Token::On
+                | Token::Group
+                | Token::Order
+                | Token::Having
+                | Token::Limit
+                | Token::Offset
+                | Token::And
+                | Token::Or
+                | Token::With
+        )
     }
 
     fn parse_expr(&mut self) -> Result<Expr> {
@@ -270,6 +384,29 @@ impl Parser {
 
     fn parse_comparison_expr(&mut self) -> Result<Expr> {
         let mut left = self.parse_additive_expr()?;
+
+        // Check for IN subquery: expr [NOT] IN (SELECT ...)
+        let negated = self.match_token(&Token::Not);
+        if self.match_token(&Token::In) {
+            self.expect_token(&Token::LeftParen)?;
+            if self.current_token() == &Token::Select {
+                let subquery = Box::new(self.parse_select_statement()?);
+                self.expect_token(&Token::RightParen)?;
+                return Ok(Expr::InSubquery {
+                    expr: Box::new(left),
+                    subquery,
+                    negated,
+                });
+            } else {
+                // TODO: Handle IN (value_list) - for now error
+                return Err(QueryError::ParseError(
+                    "IN with value list not yet supported, use IN (SELECT ...)".to_string(),
+                ));
+            }
+        } else if negated {
+            // We consumed NOT but no IN followed - this is an error
+            return Err(QueryError::ParseError("Expected IN after NOT".to_string()));
+        }
 
         if let Some(op) = self.match_comparison_op() {
             let right = self.parse_additive_expr()?;
@@ -314,11 +451,34 @@ impl Parser {
     }
 
     fn parse_unary_expr(&mut self) -> Result<Expr> {
+        // Handle NOT EXISTS (...)
         if self.match_token(&Token::Not) {
+            // Check if followed by EXISTS
+            if self.match_token(&Token::Exists) {
+                self.expect_token(&Token::LeftParen)?;
+                let subquery = Box::new(self.parse_select_statement()?);
+                self.expect_token(&Token::RightParen)?;
+                return Ok(Expr::Exists {
+                    subquery,
+                    negated: true,
+                });
+            }
+            // Regular NOT expression
             let expr = self.parse_unary_expr()?;
             return Ok(Expr::UnaryOp {
                 op: UnaryOperator::Not,
                 expr: Box::new(expr),
+            });
+        }
+
+        // Handle EXISTS (...)
+        if self.match_token(&Token::Exists) {
+            self.expect_token(&Token::LeftParen)?;
+            let subquery = Box::new(self.parse_select_statement()?);
+            self.expect_token(&Token::RightParen)?;
+            return Ok(Expr::Exists {
+                subquery,
+                negated: false,
             });
         }
 
@@ -365,9 +525,17 @@ impl Parser {
             }
             Token::LeftParen => {
                 self.advance();
-                let expr = self.parse_expr()?;
-                self.expect_token(&Token::RightParen)?;
-                Ok(expr)
+                // Check if this is a scalar subquery
+                if self.current_token() == &Token::Select {
+                    let subquery = Box::new(self.parse_select_statement()?);
+                    self.expect_token(&Token::RightParen)?;
+                    Ok(Expr::Subquery(subquery))
+                } else {
+                    // Regular parenthesized expression
+                    let expr = self.parse_expr()?;
+                    self.expect_token(&Token::RightParen)?;
+                    Ok(expr)
+                }
             }
             Token::Null => {
                 self.advance();

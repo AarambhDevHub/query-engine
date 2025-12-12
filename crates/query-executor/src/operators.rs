@@ -29,6 +29,25 @@ pub fn evaluate_expr(expr: &PhysicalExpr, batch: &RecordBatch) -> Result<ArrayRe
             let array = evaluate_expr(expr, batch)?;
             evaluate_unary_op(&array, *op)
         }
+        PhysicalExpr::ScalarSubquery { .. } => {
+            // Scalar subquery evaluation would require async execution context
+            // For now, return an error - full implementation would need executor access
+            Err(QueryError::ExecutionError(
+                "Scalar subquery execution not yet implemented in synchronous context".to_string(),
+            ))
+        }
+        PhysicalExpr::InSubquery { .. } => {
+            // IN subquery evaluation would require async execution context
+            Err(QueryError::ExecutionError(
+                "IN subquery execution not yet implemented in synchronous context".to_string(),
+            ))
+        }
+        PhysicalExpr::Exists { .. } => {
+            // EXISTS subquery evaluation would require async execution context
+            Err(QueryError::ExecutionError(
+                "EXISTS subquery execution not yet implemented in synchronous context".to_string(),
+            ))
+        }
     }
 }
 

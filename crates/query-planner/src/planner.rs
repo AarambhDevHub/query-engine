@@ -21,33 +21,70 @@ impl Planner {
 
     pub fn create_logical_plan(&self, statement: &Statement) -> Result<LogicalPlan> {
         match statement {
-            Statement::Select(select) => self.plan_select(select),
+            Statement::Select(select) => self.plan_select(select, &HashMap::new()),
+            Statement::WithSelect { with, select } => {
+                // Build CTE schemas map
+                let mut cte_schemas: HashMap<String, Schema> = HashMap::new();
+                for cte in &with.ctes {
+                    // Plan the CTE query to get its schema
+                    let cte_plan = self.plan_select(&cte.query, &cte_schemas)?;
+                    cte_schemas.insert(cte.name.clone(), cte_plan.schema().clone());
+                }
+                // Plan the main select with CTE schemas available
+                self.plan_select(select, &cte_schemas)
+            }
         }
     }
 
-    fn plan_select(&self, select: &query_parser::SelectStatement) -> Result<LogicalPlan> {
+    fn plan_select(
+        &self,
+        select: &query_parser::SelectStatement,
+        cte_schemas: &HashMap<String, Schema>,
+    ) -> Result<LogicalPlan> {
         let mut table_aliases = HashMap::new();
 
         let mut plan = if let Some(table_ref) = &select.from {
-            let schema = self
-                .schemas
-                .get(&table_ref.name)
-                .ok_or_else(|| QueryError::TableNotFound(table_ref.name.clone()))?
-                .clone();
+            match table_ref {
+                query_parser::TableReference::Table { name, alias } => {
+                    // Check CTEs first, then registered tables
+                    let schema = cte_schemas
+                        .get(name)
+                        .or_else(|| self.schemas.get(name))
+                        .ok_or_else(|| QueryError::TableNotFound(name.clone()))?
+                        .clone();
 
-            // Register table alias
-            if let Some(alias) = &table_ref.alias {
-                table_aliases.insert(alias.clone(), table_ref.name.clone());
-            }
-            table_aliases.insert(table_ref.name.clone(), table_ref.name.clone());
+                    // Register table alias
+                    if let Some(a) = alias {
+                        table_aliases.insert(a.clone(), name.clone());
+                    }
+                    table_aliases.insert(name.clone(), name.clone());
 
-            // Create schema with prefixed column names for JOINs
-            let prefixed_schema = self.prefix_schema_with_table(&schema, &table_ref.name);
+                    // Create schema with prefixed column names for JOINs
+                    let prefixed_schema = self.prefix_schema_with_table(&schema, name);
 
-            LogicalPlan::TableScan {
-                table_name: table_ref.name.clone(),
-                schema: prefixed_schema,
-                projection: None,
+                    LogicalPlan::TableScan {
+                        table_name: name.clone(),
+                        schema: prefixed_schema,
+                        projection: None,
+                    }
+                }
+                query_parser::TableReference::Subquery { query, alias } => {
+                    // Plan the subquery
+                    let subquery_plan = self.plan_select(query, cte_schemas)?;
+                    let schema = subquery_plan.schema().clone();
+
+                    // Register alias
+                    table_aliases.insert(alias.clone(), alias.clone());
+
+                    // Prefix schema with alias
+                    let prefixed_schema = self.prefix_schema_with_table(&schema, alias);
+
+                    LogicalPlan::SubqueryScan {
+                        subquery: Arc::new(subquery_plan),
+                        alias: alias.clone(),
+                        schema: prefixed_schema,
+                    }
+                }
             }
         } else {
             LogicalPlan::EmptyRelation {
@@ -57,24 +94,35 @@ impl Planner {
 
         // Process JOINs
         for join in &select.joins {
-            let right_schema = self
-                .schemas
-                .get(&join.right.name)
-                .ok_or_else(|| QueryError::TableNotFound(join.right.name.clone()))?
+            // Extract table name and alias from Join.right (which is a TableReference enum)
+            let (right_name, right_alias) = match &join.right {
+                query_parser::TableReference::Table { name, alias } => {
+                    (name.clone(), alias.clone())
+                }
+                query_parser::TableReference::Subquery { alias, .. } => {
+                    // For subquery join, we'd need special handling
+                    // For now, treat the alias as both name and identifier
+                    (alias.clone(), Some(alias.clone()))
+                }
+            };
+
+            let right_schema = cte_schemas
+                .get(&right_name)
+                .or_else(|| self.schemas.get(&right_name))
+                .ok_or_else(|| QueryError::TableNotFound(right_name.clone()))?
                 .clone();
 
             // Register right table alias
-            if let Some(alias) = &join.right.alias {
-                table_aliases.insert(alias.clone(), join.right.name.clone());
+            if let Some(alias) = &right_alias {
+                table_aliases.insert(alias.clone(), right_name.clone());
             }
-            table_aliases.insert(join.right.name.clone(), join.right.name.clone());
+            table_aliases.insert(right_name.clone(), right_name.clone());
 
             // Create schema with prefixed column names for JOINs
-            let prefixed_right_schema =
-                self.prefix_schema_with_table(&right_schema, &join.right.name);
+            let prefixed_right_schema = self.prefix_schema_with_table(&right_schema, &right_name);
 
             let right_plan = LogicalPlan::TableScan {
-                table_name: join.right.name.clone(),
+                table_name: right_name.clone(),
                 schema: prefixed_right_schema.clone(),
                 projection: None,
             };
@@ -374,6 +422,32 @@ impl Planner {
                 )?),
                 data_type: data_type.clone(),
             }),
+            Expr::Subquery(subquery) => {
+                // Plan the subquery as a nested plan
+                let subquery_plan = self.plan_select(subquery, &HashMap::new())?;
+                Ok(LogicalExpr::ScalarSubquery(Arc::new(subquery_plan)))
+            }
+            Expr::InSubquery {
+                expr,
+                subquery,
+                negated,
+            } => {
+                let logical_expr =
+                    self.create_logical_expr_with_context(expr, schema, table_aliases)?;
+                let subquery_plan = self.plan_select(subquery, &HashMap::new())?;
+                Ok(LogicalExpr::InSubquery {
+                    expr: Box::new(logical_expr),
+                    subquery: Arc::new(subquery_plan),
+                    negated: *negated,
+                })
+            }
+            Expr::Exists { subquery, negated } => {
+                let subquery_plan = self.plan_select(subquery, &HashMap::new())?;
+                Ok(LogicalExpr::Exists {
+                    subquery: Arc::new(subquery_plan),
+                    negated: *negated,
+                })
+            }
         }
     }
 
@@ -471,6 +545,30 @@ impl Planner {
                 expr: Box::new(self._create_logical_expr(expr, schema)?),
                 data_type: data_type.clone(),
             }),
+            Expr::Subquery(subquery) => {
+                let subquery_plan = self.plan_select(subquery, &HashMap::new())?;
+                Ok(LogicalExpr::ScalarSubquery(Arc::new(subquery_plan)))
+            }
+            Expr::InSubquery {
+                expr,
+                subquery,
+                negated,
+            } => {
+                let logical_expr = self._create_logical_expr(expr, schema)?;
+                let subquery_plan = self.plan_select(subquery, &HashMap::new())?;
+                Ok(LogicalExpr::InSubquery {
+                    expr: Box::new(logical_expr),
+                    subquery: Arc::new(subquery_plan),
+                    negated: *negated,
+                })
+            }
+            Expr::Exists { subquery, negated } => {
+                let subquery_plan = self.plan_select(subquery, &HashMap::new())?;
+                Ok(LogicalExpr::Exists {
+                    subquery: Arc::new(subquery_plan),
+                    negated: *negated,
+                })
+            }
         }
     }
 
@@ -557,6 +655,17 @@ impl Planner {
             LogicalExpr::AggregateFunction { .. } => Ok(DataType::Float64),
             LogicalExpr::Cast { data_type, .. } => Ok(data_type.clone()),
             LogicalExpr::Alias { expr, .. } => self.expr_data_type(expr, schema),
+            LogicalExpr::ScalarSubquery(subquery) => {
+                // Scalar subquery returns the type of its first column
+                let sub_schema = subquery.schema();
+                if let Some(field) = sub_schema.field(0) {
+                    Ok(field.data_type().clone())
+                } else {
+                    Ok(DataType::Null)
+                }
+            }
+            LogicalExpr::InSubquery { .. } => Ok(DataType::Boolean),
+            LogicalExpr::Exists { .. } => Ok(DataType::Boolean),
         }
     }
 

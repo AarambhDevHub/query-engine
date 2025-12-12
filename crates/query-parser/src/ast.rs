@@ -3,6 +3,25 @@ use query_core::DataType;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
     Select(SelectStatement),
+    WithSelect {
+        with: WithClause,
+        select: SelectStatement,
+    },
+}
+
+/// WITH clause containing one or more CTEs
+#[derive(Debug, Clone, PartialEq)]
+pub struct WithClause {
+    pub recursive: bool,
+    pub ctes: Vec<CteDefinition>,
+}
+
+/// CTE definition: name [(columns)] AS (subquery)
+#[derive(Debug, Clone, PartialEq)]
+pub struct CteDefinition {
+    pub name: String,
+    pub columns: Option<Vec<String>>,
+    pub query: Box<SelectStatement>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -27,9 +46,14 @@ pub enum SelectItem {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct TableReference {
-    pub name: String,
-    pub alias: Option<String>,
+pub enum TableReference {
+    /// Simple table reference: table_name [AS alias]
+    Table { name: String, alias: Option<String> },
+    /// Subquery in FROM clause: (SELECT ...) AS alias
+    Subquery {
+        query: Box<SelectStatement>,
+        alias: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -72,6 +96,19 @@ pub enum Expr {
     Cast {
         expr: Box<Expr>,
         data_type: DataType,
+    },
+    /// Scalar subquery: (SELECT ...)
+    Subquery(Box<SelectStatement>),
+    /// IN subquery: expr [NOT] IN (SELECT ...)
+    InSubquery {
+        expr: Box<Expr>,
+        subquery: Box<SelectStatement>,
+        negated: bool,
+    },
+    /// EXISTS subquery: [NOT] EXISTS (SELECT ...)
+    Exists {
+        subquery: Box<SelectStatement>,
+        negated: bool,
     },
 }
 

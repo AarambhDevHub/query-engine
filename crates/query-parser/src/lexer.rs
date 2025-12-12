@@ -36,6 +36,9 @@ pub enum Token {
     Avg,
     Min,
     Max,
+    With,
+    Recursive,
+    Exists,
 
     // Operators
     Plus,
@@ -268,6 +271,9 @@ impl Lexer {
             "AVG" => Token::Avg,
             "MIN" => Token::Min,
             "MAX" => Token::Max,
+            "WITH" => Token::With,
+            "RECURSIVE" => Token::Recursive,
+            "EXISTS" => Token::Exists,
             _ => Token::Identifier(ident),
         };
 

@@ -11,6 +11,7 @@ A high-performance, production-ready SQL query engine built in Rust with Apache 
 - **⚡ High Performance**: Vectorized execution using Apache Arrow for maximum throughput
 - **🔍 SQL Support**: Comprehensive SQL syntax including SELECT, WHERE, GROUP BY, ORDER BY, LIMIT, and JOINs
 - **🔗 JOIN Operations**: Full support for INNER, LEFT, RIGHT, FULL OUTER, and CROSS JOINs with table aliases
+- **📦 Subqueries & CTEs**: Common Table Expressions (WITH), scalar subqueries, IN/EXISTS subqueries, derived tables
 - **📊 Aggregate Functions**: COUNT, SUM, AVG, MIN, MAX with GROUP BY support
 - **📁 Multiple Data Sources**: CSV, Parquet, and in-memory tables
 - **🎯 Query Optimization**: Predicate pushdown and logical plan optimization
@@ -270,6 +271,50 @@ ORDER BY avg_salary DESC;
 - **RIGHT JOIN** (RIGHT OUTER JOIN): Returns all rows from right table with matching rows from left
 - **FULL JOIN** (FULL OUTER JOIN): Returns all rows when there's a match in either table
 - **CROSS JOIN**: Returns Cartesian product of both tables
+
+### Common Table Expressions (CTEs)
+
+```sql
+-- Simple CTE
+WITH high_earners AS (
+  SELECT name, salary, dept_id FROM employees WHERE salary > 80000
+)
+SELECT h.name, d.dept_name
+FROM high_earners h
+JOIN departments d ON h.dept_id = d.dept_id;
+
+-- Multiple CTEs
+WITH
+  dept_stats AS (
+    SELECT dept_id, AVG(salary) as avg_sal FROM employees GROUP BY dept_id
+  ),
+  big_depts AS (
+    SELECT dept_id FROM dept_stats WHERE avg_sal > 70000
+  )
+SELECT d.dept_name FROM departments d JOIN big_depts b ON d.dept_id = b.dept_id;
+```
+
+### Subqueries
+
+```sql
+-- Subquery in FROM clause (derived table)
+SELECT sub.name, sub.total
+FROM (SELECT name, SUM(amount) as total FROM sales GROUP BY name) AS sub
+WHERE sub.total > 1000;
+
+-- Scalar subquery in SELECT
+SELECT name, salary, (SELECT AVG(salary) FROM employees) as company_avg
+FROM employees;
+
+-- IN subquery
+SELECT name FROM employees
+WHERE dept_id IN (SELECT dept_id FROM departments WHERE location = 'NYC');
+
+-- EXISTS subquery
+SELECT d.dept_name FROM departments d
+WHERE EXISTS (SELECT 1 FROM employees e WHERE e.dept_id = d.dept_id);
+```
+
 
 ### Supported Operators
 
@@ -623,7 +668,7 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 ## 🗺️ Roadmap
 
 - [x] ~~JOIN operations (INNER, LEFT, RIGHT, FULL, CROSS)~~ ✅ **Completed!**
-- [ ] Subqueries and CTEs
+- [x] ~~Subqueries and CTEs~~ ✅ **Completed!**
 - [ ] Window functions
 - [ ] User-defined functions (UDFs)
 - [ ] Index support
@@ -640,6 +685,11 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 **Stability**: Alpha
 
 ### Recently Completed
+- ✅ **Subqueries and CTEs** (NEW!)
+  - Common Table Expressions with `WITH ... AS (...)`
+  - Subqueries in FROM clause (derived tables)
+  - Scalar subqueries in SELECT
+  - IN and EXISTS subqueries in WHERE
 - ✅ Full JOIN support (INNER, LEFT, RIGHT, FULL OUTER, CROSS)
 - ✅ Table aliases and qualified column names
 - ✅ Multiple JOIN operations in single query

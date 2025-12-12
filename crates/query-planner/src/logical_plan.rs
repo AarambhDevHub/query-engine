@@ -44,6 +44,12 @@ pub enum LogicalPlan {
     EmptyRelation {
         schema: Schema,
     },
+    /// Subquery as a table source (derived table)
+    SubqueryScan {
+        subquery: Arc<LogicalPlan>,
+        alias: String,
+        schema: Schema,
+    },
 }
 
 impl LogicalPlan {
@@ -57,6 +63,7 @@ impl LogicalPlan {
             LogicalPlan::Sort { input, .. } => input.schema(),
             LogicalPlan::Limit { input, .. } => input.schema(),
             LogicalPlan::EmptyRelation { schema } => schema,
+            LogicalPlan::SubqueryScan { schema, .. } => schema,
         }
     }
 }
@@ -88,6 +95,19 @@ pub enum LogicalExpr {
     Alias {
         expr: Box<LogicalExpr>,
         alias: String,
+    },
+    /// Scalar subquery: returns a single value
+    ScalarSubquery(Arc<LogicalPlan>),
+    /// IN subquery: expr [NOT] IN (subquery)
+    InSubquery {
+        expr: Box<LogicalExpr>,
+        subquery: Arc<LogicalPlan>,
+        negated: bool,
+    },
+    /// EXISTS: [NOT] EXISTS (subquery)
+    Exists {
+        subquery: Arc<LogicalPlan>,
+        negated: bool,
     },
 }
 

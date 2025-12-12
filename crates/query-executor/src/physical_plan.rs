@@ -47,6 +47,11 @@ pub enum PhysicalPlan {
         skip: usize,
         fetch: Option<usize>,
     },
+    /// Subquery scan for derived tables
+    SubqueryScan {
+        subquery: Arc<PhysicalPlan>,
+        schema: Schema,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -64,6 +69,21 @@ pub enum PhysicalExpr {
     UnaryExpr {
         op: UnaryOp,
         expr: Box<PhysicalExpr>,
+    },
+    /// Scalar subquery - executes and returns single value
+    ScalarSubquery {
+        plan: Arc<PhysicalPlan>,
+    },
+    /// IN subquery - checks if expr is in subquery results
+    InSubquery {
+        expr: Box<PhysicalExpr>,
+        plan: Arc<PhysicalPlan>,
+        negated: bool,
+    },
+    /// EXISTS subquery - checks if subquery returns any rows
+    Exists {
+        plan: Arc<PhysicalPlan>,
+        negated: bool,
     },
 }
 

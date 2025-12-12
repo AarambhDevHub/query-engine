@@ -1,6 +1,6 @@
 use query_core::{DataType, Schema};
 use query_parser::{
-    AggregateFunction, BinaryOperator, JoinType, UnaryOperator, WindowFunctionType,
+    AggregateFunction, BinaryOperator, JoinType, ScalarFunction, UnaryOperator, WindowFunctionType,
 };
 use std::sync::Arc;
 
@@ -124,6 +124,11 @@ pub enum LogicalExpr {
         args: Vec<Box<LogicalExpr>>,
         partition_by: Vec<LogicalExpr>,
         order_by: Vec<LogicalExpr>,
+    },
+    /// Scalar function expression
+    ScalarFunction {
+        func: ScalarFunction,
+        args: Vec<Box<LogicalExpr>>,
     },
 }
 

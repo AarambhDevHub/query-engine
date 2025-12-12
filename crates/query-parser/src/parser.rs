@@ -532,6 +532,22 @@ impl Parser {
             | Token::Lead
             | Token::FirstValue
             | Token::LastValue => self.parse_window_function(),
+            // Scalar functions
+            Token::Upper
+            | Token::Lower
+            | Token::Length
+            | Token::Concat
+            | Token::Substring
+            | Token::Trim
+            | Token::Replace
+            | Token::Abs
+            | Token::Ceil
+            | Token::Floor
+            | Token::Round
+            | Token::Sqrt
+            | Token::Power
+            | Token::Coalesce
+            | Token::Nullif => self.parse_scalar_function(),
             Token::LeftParen => {
                 self.advance();
                 // Check if this is a scalar subquery
@@ -594,6 +610,44 @@ impl Parser {
         }
 
         Ok(exprs)
+    }
+
+    /// Parse a scalar function call: UPPER(x), CONCAT(a, b), etc.
+    fn parse_scalar_function(&mut self) -> Result<Expr> {
+        let func = match self.current_token() {
+            Token::Upper => ScalarFunction::Upper,
+            Token::Lower => ScalarFunction::Lower,
+            Token::Length => ScalarFunction::Length,
+            Token::Concat => ScalarFunction::Concat,
+            Token::Substring => ScalarFunction::Substring,
+            Token::Trim => ScalarFunction::Trim,
+            Token::Replace => ScalarFunction::Replace,
+            Token::Abs => ScalarFunction::Abs,
+            Token::Ceil => ScalarFunction::Ceil,
+            Token::Floor => ScalarFunction::Floor,
+            Token::Round => ScalarFunction::Round,
+            Token::Sqrt => ScalarFunction::Sqrt,
+            Token::Power => ScalarFunction::Power,
+            Token::Coalesce => ScalarFunction::Coalesce,
+            Token::Nullif => ScalarFunction::Nullif,
+            _ => {
+                return Err(QueryError::ParseError(
+                    "Expected scalar function".to_string(),
+                ));
+            }
+        };
+        self.advance();
+
+        // Parse function arguments
+        self.expect_token(&Token::LeftParen)?;
+        let args = if self.current_token() != &Token::RightParen {
+            self.parse_expr_list()?
+        } else {
+            vec![]
+        };
+        self.expect_token(&Token::RightParen)?;
+
+        Ok(Expr::ScalarFunction { func, args })
     }
 
     fn parse_order_by(&mut self) -> Result<Vec<OrderByExpr>> {

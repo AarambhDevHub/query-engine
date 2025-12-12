@@ -116,6 +116,11 @@ pub enum Expr {
         args: Vec<Expr>,
         over: WindowSpec,
     },
+    /// Scalar function call: UPPER(x), CONCAT(a, b), etc.
+    ScalarFunction {
+        func: ScalarFunction,
+        args: Vec<Expr>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -162,6 +167,29 @@ pub enum AggregateFunction {
 pub struct OrderByExpr {
     pub expr: Expr,
     pub asc: bool,
+}
+
+/// Built-in scalar function types
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScalarFunction {
+    // String functions
+    Upper,
+    Lower,
+    Length,
+    Concat,
+    Substring,
+    Trim,
+    Replace,
+    // Math functions
+    Abs,
+    Ceil,
+    Floor,
+    Round,
+    Sqrt,
+    Power,
+    // Null handling
+    Coalesce,
+    Nullif,
 }
 
 /// Window function types

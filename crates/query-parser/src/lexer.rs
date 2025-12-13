@@ -75,6 +75,16 @@ pub enum Token {
     // Built-in scalar functions - Null handling
     Coalesce,
     Nullif,
+    // DDL keywords
+    Create,
+    Drop,
+    Index,
+    Unique,
+    Using,
+    If,
+    // Index type keywords
+    BTree,
+    Hash,
 
     // Operators
     Plus,
@@ -346,6 +356,16 @@ impl Lexer {
             // Built-in scalar functions - Null handling
             "COALESCE" => Token::Coalesce,
             "NULLIF" => Token::Nullif,
+            // DDL keywords
+            "CREATE" => Token::Create,
+            "DROP" => Token::Drop,
+            "INDEX" => Token::Index,
+            "UNIQUE" => Token::Unique,
+            "USING" => Token::Using,
+            "IF" => Token::If,
+            // Index types
+            "BTREE" => Token::BTree,
+            "HASH" => Token::Hash,
             _ => Token::Identifier(ident),
         };
 

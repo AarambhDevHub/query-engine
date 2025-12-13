@@ -18,11 +18,94 @@ impl Parser {
     }
 
     pub fn parse(&mut self) -> Result<Statement> {
+        // Check for CREATE statement
+        if self.current_token() == &Token::Create {
+            return self.parse_create_statement();
+        }
+        // Check for DROP statement
+        if self.current_token() == &Token::Drop {
+            return self.parse_drop_statement();
+        }
         // Check for WITH clause (CTE)
         if self.current_token() == &Token::With {
             return self.parse_with_statement();
         }
         self.parse_select()
+    }
+
+    /// Parse CREATE statement (currently only CREATE INDEX)
+    fn parse_create_statement(&mut self) -> Result<Statement> {
+        self.expect_token(&Token::Create)?;
+
+        // Check for UNIQUE modifier
+        let unique = self.match_token(&Token::Unique);
+
+        // Expect INDEX keyword
+        self.expect_token(&Token::Index)?;
+
+        // Parse index name
+        let name = self.parse_identifier()?;
+
+        // Expect ON keyword
+        self.expect_token(&Token::On)?;
+
+        // Parse table name
+        let table = self.parse_identifier()?;
+
+        // Parse column list
+        self.expect_token(&Token::LeftParen)?;
+        let mut columns = Vec::new();
+        loop {
+            columns.push(self.parse_identifier()?);
+            if !self.match_token(&Token::Comma) {
+                break;
+            }
+        }
+        self.expect_token(&Token::RightParen)?;
+
+        // Parse optional USING clause
+        let index_type = if self.match_token(&Token::Using) {
+            if self.match_token(&Token::BTree) {
+                IndexType::BTree
+            } else if self.match_token(&Token::Hash) {
+                IndexType::Hash
+            } else {
+                return Err(QueryError::ParseError(
+                    "Expected BTREE or HASH after USING".to_string(),
+                ));
+            }
+        } else {
+            IndexType::default()
+        };
+
+        Ok(Statement::CreateIndex(CreateIndexStatement {
+            name,
+            table,
+            columns,
+            unique,
+            index_type,
+        }))
+    }
+
+    /// Parse DROP statement (currently only DROP INDEX)
+    fn parse_drop_statement(&mut self) -> Result<Statement> {
+        self.expect_token(&Token::Drop)?;
+
+        // Expect INDEX keyword
+        self.expect_token(&Token::Index)?;
+
+        // Check for IF EXISTS
+        let if_exists = if self.match_token(&Token::If) {
+            self.expect_token(&Token::Exists)?;
+            true
+        } else {
+            false
+        };
+
+        // Parse index name
+        let name = self.parse_identifier()?;
+
+        Ok(Statement::DropIndex(DropIndexStatement { name, if_exists }))
     }
 
     /// Parse WITH clause: WITH [RECURSIVE] cte_name [(col1, ...)] AS (SELECT ...), ...

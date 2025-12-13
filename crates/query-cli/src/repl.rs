@@ -5,7 +5,8 @@ use comfy_table::{Cell, Color, Table as ComfyTable};
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use query_core::{DataType, Field, Schema};
 use query_executor::QueryExecutor;
-use query_parser::Parser;
+use query_index::IndexManager;
+use query_parser::{Parser, Statement};
 use query_planner::{Optimizer, Planner};
 use query_storage::MemoryDataSource;
 use rustyline::DefaultEditor;
@@ -18,12 +19,16 @@ use std::time::Instant;
 
 pub struct Repl {
     config: Config,
+    #[allow(dead_code)]
     db_path: Option<PathBuf>,
     editor: DefaultEditor,
     planner: Planner,
+    #[allow(dead_code)]
     executor: QueryExecutor,
     tables: HashMap<String, TableInfo>,
     history_file: PathBuf,
+    /// Global index manager for all tables
+    index_manager: Arc<IndexManager>,
 }
 
 struct TableInfo {
@@ -32,6 +37,7 @@ struct TableInfo {
     row_count: Option<usize>,
 }
 
+#[allow(dead_code)]
 enum TableSource {
     Csv(PathBuf),
     Parquet(PathBuf),
@@ -54,6 +60,7 @@ impl Repl {
             executor: QueryExecutor::new(),
             tables: HashMap::new(),
             history_file,
+            index_manager: Arc::new(IndexManager::new()),
         })
     }
 
@@ -71,6 +78,7 @@ impl Repl {
             "  {} - Load Parquet file",
             ".load parquet <path> [name]".bright_cyan()
         );
+        println!("  {} - List indexes", ".indexes [table]".bright_cyan());
         println!();
 
         loop {
@@ -209,6 +217,11 @@ impl Repl {
                 self.drop_table(parts[1]);
                 Ok(())
             }
+            ".indexes" => {
+                let table_name = parts.get(1).map(|s| *s);
+                self.show_indexes(table_name);
+                Ok(())
+            }
             _ => {
                 anyhow::bail!(
                     "Unknown command: {}. Type .help for available commands",
@@ -224,6 +237,17 @@ impl Repl {
         // Parse SQL
         let mut parser = Parser::new(sql).context("Failed to create parser")?;
         let statement = parser.parse().context("Failed to parse SQL")?;
+
+        // Handle DDL statements separately
+        match &statement {
+            Statement::CreateIndex(create_idx) => {
+                return self.handle_create_index(create_idx).await;
+            }
+            Statement::DropIndex(drop_idx) => {
+                return self.handle_drop_index(drop_idx).await;
+            }
+            _ => {}
+        }
 
         if self.config.show_plan {
             println!("{}", "Parsed Statement:".bright_blue());
@@ -263,6 +287,105 @@ impl Repl {
             println!(
                 "{} {:.2}ms",
                 "Planning time:".bright_yellow(),
+                elapsed.as_secs_f64() * 1000.0
+            );
+        }
+
+        Ok(())
+    }
+
+    async fn handle_create_index(
+        &mut self,
+        stmt: &query_parser::CreateIndexStatement,
+    ) -> Result<()> {
+        let start = Instant::now();
+
+        // Check if table exists
+        if !self.tables.contains_key(&stmt.table) {
+            anyhow::bail!("Table '{}' not found", stmt.table);
+        }
+
+        // Create the index using the index manager
+        let index_type = match stmt.index_type {
+            query_parser::IndexType::BTree => query_index::IndexType::BTree,
+            query_parser::IndexType::Hash => query_index::IndexType::Hash,
+        };
+
+        match index_type {
+            query_index::IndexType::BTree => {
+                self.index_manager.create_btree_index(
+                    &stmt.name,
+                    &stmt.table,
+                    stmt.columns.clone(),
+                    stmt.unique,
+                )?;
+            }
+            query_index::IndexType::Hash => {
+                self.index_manager.create_hash_index(
+                    &stmt.name,
+                    &stmt.table,
+                    stmt.columns.clone(),
+                    stmt.unique,
+                )?;
+            }
+        }
+
+        let elapsed = start.elapsed();
+
+        println!(
+            "{} Created {} index '{}' on {}({})",
+            "✓".bright_green(),
+            if stmt.unique { "unique " } else { "" },
+            stmt.name.bright_cyan(),
+            stmt.table.bright_yellow(),
+            stmt.columns.join(", ")
+        );
+
+        if self.config.show_timing {
+            println!(
+                "{} {:.2}ms",
+                "Index creation time:".bright_yellow(),
+                elapsed.as_secs_f64() * 1000.0
+            );
+        }
+
+        Ok(())
+    }
+
+    async fn handle_drop_index(&mut self, stmt: &query_parser::DropIndexStatement) -> Result<()> {
+        let start = Instant::now();
+
+        if stmt.if_exists {
+            match self.index_manager.drop_index_if_exists(&stmt.name)? {
+                true => {
+                    println!(
+                        "{} Dropped index '{}'",
+                        "✓".bright_green(),
+                        stmt.name.bright_cyan()
+                    );
+                }
+                false => {
+                    println!(
+                        "{} Index '{}' does not exist (skipped)",
+                        "→".bright_blue(),
+                        stmt.name.bright_cyan()
+                    );
+                }
+            }
+        } else {
+            self.index_manager.drop_index(&stmt.name)?;
+            println!(
+                "{} Dropped index '{}'",
+                "✓".bright_green(),
+                stmt.name.bright_cyan()
+            );
+        }
+
+        if self.config.show_timing {
+            let elapsed = start.elapsed();
+            println!(
+                "{} {:.2}ms",
+                "Drop time:".bright_yellow(),
                 elapsed.as_secs_f64() * 1000.0
             );
         }
@@ -412,6 +535,13 @@ impl Repl {
         println!("  INNER, LEFT, RIGHT, FULL OUTER, CROSS");
         println!("  Table aliases and qualified column names");
         println!();
+        println!("{}", "Index Commands:".bright_yellow().bold());
+        println!("  CREATE INDEX idx ON table (col)");
+        println!("  CREATE UNIQUE INDEX idx ON table (col)");
+        println!("  CREATE INDEX idx ON table (col) USING HASH");
+        println!("  DROP INDEX idx");
+        println!("  DROP INDEX IF EXISTS idx");
+        println!();
     }
 
     fn show_tables(&self) {
@@ -552,6 +682,59 @@ impl Repl {
         } else {
             println!("{} Table '{}' not found", "✗".bright_red(), table_name);
         }
+    }
+
+    fn show_indexes(&self, table_name: Option<&str>) {
+        let all_metadata = self.index_manager.list_all_metadata();
+
+        let filtered: Vec<_> = if let Some(table) = table_name {
+            all_metadata
+                .into_iter()
+                .filter(|m| m.table_name == table)
+                .collect()
+        } else {
+            all_metadata
+        };
+
+        if filtered.is_empty() {
+            if let Some(table) = table_name {
+                println!(
+                    "{} No indexes found for table '{}'",
+                    "→".bright_blue(),
+                    table.bright_cyan()
+                );
+            } else {
+                println!("{} No indexes defined", "→".bright_blue());
+            }
+            println!("Create an index with: CREATE INDEX idx_name ON table (column)");
+            return;
+        }
+
+        let mut table = ComfyTable::new();
+        table.set_header(vec![
+            Cell::new("Index Name").fg(Color::Cyan),
+            Cell::new("Table").fg(Color::Yellow),
+            Cell::new("Columns").fg(Color::Green),
+            Cell::new("Type").fg(Color::Magenta),
+            Cell::new("Unique").fg(Color::Blue),
+        ]);
+
+        for metadata in &filtered {
+            table.add_row(vec![
+                metadata.name.as_str(),
+                metadata.table_name.as_str(),
+                &metadata.columns.join(", "),
+                &format!("{:?}", metadata.index_type),
+                &(if metadata.unique { "YES" } else { "NO" }).to_string(),
+            ]);
+        }
+
+        println!(
+            "\n{} Found {} index(es)\n",
+            "✓".bright_green(),
+            filtered.len()
+        );
+        println!("{}", table);
     }
 
     fn get_history_file() -> Result<PathBuf> {

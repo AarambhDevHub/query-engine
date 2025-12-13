@@ -58,6 +58,17 @@ pub enum PhysicalPlan {
         window_exprs: Vec<WindowExpr>,
         schema: Schema,
     },
+    /// Index-based scan for optimized queries
+    IndexScan {
+        source: Arc<dyn DataSource>,
+        index_name: String,
+        /// Keys to lookup in the index
+        lookup_keys: Vec<ScalarValue>,
+        /// Whether this is a range scan
+        is_range_scan: bool,
+        /// Schema of the result
+        schema: Schema,
+    },
 }
 
 #[derive(Debug, Clone)]

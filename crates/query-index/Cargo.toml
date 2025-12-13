@@ -1,0 +1,19 @@
+[package]
+name = "query-index"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Index implementations for Query Engine"
+
+[dependencies]
+query-core = { path = "../query-core" }
+arrow = { workspace = true }
+ahash = { workspace = true }
+parking_lot = { workspace = true }
+serde = { workspace = true }
+
+[dev-dependencies]
+criterion = "0.5"
+

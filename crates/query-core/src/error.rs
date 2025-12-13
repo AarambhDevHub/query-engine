@@ -31,6 +31,15 @@ pub enum QueryError {
 
     #[error("Table not found: {0}")]
     TableNotFound(String),
+
+    #[error("Index not found: {0}")]
+    IndexNotFound(String),
+
+    #[error("Index already exists: {0}")]
+    IndexAlreadyExists(String),
+
+    #[error("Unique constraint violation: {0}")]
+    UniqueConstraintViolation(String),
 }
 
 impl From<parquet::errors::ParquetError> for QueryError {

@@ -9,7 +9,9 @@ repository.workspace = true
 [dependencies]
 query-core = { path = "../query-core" }
 query-executor = { path = "../query-executor" }
+query-index = { path = "../query-index" }
 arrow.workspace = true
 parquet.workspace = true
 tokio.workspace = true
 async-trait.workspace = true
+

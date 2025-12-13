@@ -16,6 +16,7 @@ query-parser = { path = "../query-parser" }
 query-planner = { path = "../query-planner" }
 query-executor = { path = "../query-executor" }
 query-storage = { path = "../query-storage" }
+query-index = { path = "../query-index" }
 
 # CLI dependencies
 clap = { version = "4.5", features = ["derive", "cargo"] }

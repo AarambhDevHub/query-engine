@@ -28,11 +28,17 @@ name = "window_function_query"
 [[example]]
 name = "udf_query"
 
+[[example]]
+name = "index_query"
+
 [dependencies]
 query-core = { path = "../crates/query-core" }
 query-parser = { path = "../crates/query-parser" }
 query-planner = { path = "../crates/query-planner" }
 query-executor = { path = "../crates/query-executor" }
 query-storage = { path = "../crates/query-storage" }
+query-index = { path = "../crates/query-index" }
 tokio = { workspace = true }
 arrow = { workspace = true }
+anyhow = { workspace = true }
+

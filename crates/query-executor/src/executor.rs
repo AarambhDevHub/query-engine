@@ -78,6 +78,14 @@ impl QueryExecutor {
                     // Full implementation would compute window function results
                     self.execute_plan(input).await
                 }
+                PhysicalPlan::IndexScan { source, .. } => {
+                    // TODO: Implement proper index-based scan
+                    // For now, fall back to full table scan
+                    // A full implementation would:
+                    // 1. Look up row IDs from the index using lookup_keys
+                    // 2. Fetch only those specific rows from the source
+                    source.scan()
+                }
             }
         })
     }

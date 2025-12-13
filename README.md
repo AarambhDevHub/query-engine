@@ -15,6 +15,7 @@ A high-performance, production-ready SQL query engine built in Rust with Apache 
 - **📈 Window Functions**: ROW_NUMBER, RANK, DENSE_RANK, LAG, LEAD with PARTITION BY and ORDER BY
 - **🔧 Scalar Functions**: Built-in UDFs: UPPER, LOWER, LENGTH, CONCAT, ABS, ROUND, SQRT, etc.
 - **📊 Aggregate Functions**: COUNT, SUM, AVG, MIN, MAX with GROUP BY support
+- **🗂️ Index Support**: B-Tree and Hash indexes for fast data retrieval with CREATE/DROP INDEX syntax
 - **📁 Multiple Data Sources**: CSV, Parquet, and in-memory tables
 - **🎯 Query Optimization**: Predicate pushdown and logical plan optimization
 - **💻 Interactive CLI**: Full-featured REPL with syntax highlighting and history
@@ -673,7 +674,7 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 - [x] ~~Subqueries and CTEs~~ ✅ **Completed!**
 - [x] ~~Window functions~~ ✅ **Completed!**
 - [x] ~~User-defined functions (UDFs)~~ ✅ **Completed!**
-- [ ] Index support
+- [x] ~~Index support~~ ✅ **Completed!**
 - [ ] Distributed execution
 - [ ] Query caching
 - [ ] Real-time streaming queries
@@ -687,7 +688,14 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 **Stability**: Alpha
 
 ### Recently Completed
-- ✅ **Scalar Functions (UDFs)** (NEW!)
+- ✅ **Index Support** (NEW!)
+  - B-Tree indexes for range queries and equality
+  - Hash indexes for fast O(1) equality lookups
+  - `CREATE INDEX` and `DROP INDEX` SQL syntax
+  - IndexManager for index lifecycle management
+  - Unique constraint enforcement
+  - Multi-column index support
+- ✅ **Scalar Functions (UDFs)**
   - String: UPPER, LOWER, LENGTH, CONCAT, SUBSTRING, TRIM, REPLACE
   - Math: ABS, CEIL, FLOOR, ROUND, SQRT, POWER
   - Null handling: COALESCE, NULLIF

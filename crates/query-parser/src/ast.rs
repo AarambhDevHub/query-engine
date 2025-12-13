@@ -7,6 +7,10 @@ pub enum Statement {
         with: WithClause,
         select: SelectStatement,
     },
+    /// CREATE INDEX statement
+    CreateIndex(CreateIndexStatement),
+    /// DROP INDEX statement
+    DropIndex(DropIndexStatement),
 }
 
 /// WITH clause containing one or more CTEs
@@ -232,4 +236,45 @@ pub enum WindowFrameBound {
     CurrentRow,
     Preceding(Option<usize>), // None = UNBOUNDED
     Following(Option<usize>), // None = UNBOUNDED
+}
+
+/// Index type for CREATE INDEX
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IndexType {
+    /// B-Tree index (default) - supports range queries
+    BTree,
+    /// Hash index - optimized for equality lookups
+    Hash,
+}
+
+impl Default for IndexType {
+    fn default() -> Self {
+        IndexType::BTree
+    }
+}
+
+/// CREATE INDEX statement
+/// Syntax: CREATE [UNIQUE] INDEX name ON table (col1, col2, ...) [USING BTREE|HASH]
+#[derive(Debug, Clone, PartialEq)]
+pub struct CreateIndexStatement {
+    /// Index name
+    pub name: String,
+    /// Table name
+    pub table: String,
+    /// Columns to index (in order)
+    pub columns: Vec<String>,
+    /// Whether this is a unique index
+    pub unique: bool,
+    /// Index type (defaults to BTree)
+    pub index_type: IndexType,
+}
+
+/// DROP INDEX statement
+/// Syntax: DROP INDEX [IF EXISTS] name
+#[derive(Debug, Clone, PartialEq)]
+pub struct DropIndexStatement {
+    /// Index name to drop
+    pub name: String,
+    /// If true, don't error if index doesn't exist
+    pub if_exists: bool,
 }

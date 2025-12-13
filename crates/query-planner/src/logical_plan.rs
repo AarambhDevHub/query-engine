@@ -58,6 +58,16 @@ pub enum LogicalPlan {
         window_exprs: Vec<LogicalExpr>,
         schema: Schema,
     },
+    /// Index-based scan for optimized queries
+    IndexScan {
+        table_name: String,
+        index_name: String,
+        schema: Schema,
+        /// Predicates that can be evaluated using the index
+        index_predicates: Vec<LogicalExpr>,
+        /// Remaining predicates for post-filtering (if any)
+        residual_predicate: Option<Box<LogicalExpr>>,
+    },
 }
 
 impl LogicalPlan {
@@ -73,6 +83,7 @@ impl LogicalPlan {
             LogicalPlan::EmptyRelation { schema } => schema,
             LogicalPlan::SubqueryScan { schema, .. } => schema,
             LogicalPlan::Window { schema, .. } => schema,
+            LogicalPlan::IndexScan { schema, .. } => schema,
         }
     }
 }

@@ -33,6 +33,12 @@ impl Planner {
                 // Plan the main select with CTE schemas available
                 self.plan_select(select, &cte_schemas)
             }
+            Statement::CreateIndex(_) => Err(QueryError::PlanningError(
+                "CREATE INDEX is a DDL statement and does not produce a query plan".to_string(),
+            )),
+            Statement::DropIndex(_) => Err(QueryError::PlanningError(
+                "DROP INDEX is a DDL statement and does not produce a query plan".to_string(),
+            )),
         }
     }
 

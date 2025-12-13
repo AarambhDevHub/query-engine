@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
-members = ["crates/query-cli", "crates/query-core", "crates/query-executor", "crates/query-index", "crates/query-parser", "crates/query-planner", "crates/query-storage", "examples-package"]
+members = ["crates/query-cli", "crates/query-core", "crates/query-distributed", "crates/query-executor", "crates/query-index", "crates/query-parser", "crates/query-planner", "crates/query-storage", "examples-package"]
+
 
 [workspace.package]
 version = "0.1.0"

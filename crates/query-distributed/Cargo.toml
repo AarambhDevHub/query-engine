@@ -1,0 +1,25 @@
+[package]
+name = "query-distributed"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Distributed execution for Query Engine"
+
+[dependencies]
+query-core = { path = "../query-core" }
+query-planner = { path = "../query-planner" }
+query-executor = { path = "../query-executor" }
+arrow = { workspace = true }
+tokio = { workspace = true }
+parking_lot = { workspace = true }
+serde = { workspace = true }
+uuid = { version = "1.11", features = ["v4", "serde"] }
+dashmap = "6.1"
+tracing = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+
+[dev-dependencies]
+tokio-test = "0.4"

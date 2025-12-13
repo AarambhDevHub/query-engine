@@ -16,11 +16,13 @@ A high-performance, production-ready SQL query engine built in Rust with Apache 
 - **🔧 Scalar Functions**: Built-in UDFs: UPPER, LOWER, LENGTH, CONCAT, ABS, ROUND, SQRT, etc.
 - **📊 Aggregate Functions**: COUNT, SUM, AVG, MIN, MAX with GROUP BY support
 - **🗂️ Index Support**: B-Tree and Hash indexes for fast data retrieval with CREATE/DROP INDEX syntax
+- **🌐 Distributed Execution**: Coordinator/Worker architecture with partitioning and fault tolerance
 - **📁 Multiple Data Sources**: CSV, Parquet, and in-memory tables
 - **🎯 Query Optimization**: Predicate pushdown and logical plan optimization
 - **💻 Interactive CLI**: Full-featured REPL with syntax highlighting and history
 - **🏗️ Modular Architecture**: Clean workspace structure with separated concerns
 - **🔧 Production Ready**: Optimized compilation, comprehensive error handling
+
 
 ## 📋 Table of Contents
 
@@ -154,12 +156,15 @@ query-engine/
 │   ├── query-planner/      # Logical planning and optimization
 │   ├── query-executor/     # Physical execution engine
 │   ├── query-storage/      # Data source implementations
+│   ├── query-index/        # B-Tree and Hash index support
+│   ├── query-distributed/  # Distributed execution framework
 │   └── query-cli/          # Command-line interface
 ├── examples-package/       # Usage examples
 └── Cargo.toml             # Workspace configuration
 ```
 
 ## 💻 CLI Usage
+
 
 ### REPL Commands
 
@@ -336,7 +341,145 @@ WHERE EXISTS (SELECT 1 FROM employees e WHERE e.dept_id = d.dept_id);
 - **Boolean**: `BOOLEAN`
 - **Null**: `NULL`
 
+### Index Support
+
+Query Engine supports indexes for fast data retrieval:
+
+```sql
+-- Create a B-Tree index (good for range queries)
+CREATE INDEX idx_salary ON employees(salary);
+
+-- Create a Hash index (fast O(1) lookups)
+CREATE INDEX idx_email ON users(email) USING HASH;
+
+-- Create a unique index
+CREATE UNIQUE INDEX idx_emp_id ON employees(employee_id);
+
+-- Create a multi-column index
+CREATE INDEX idx_name_dept ON employees(name, dept_id);
+
+-- Drop an index
+DROP INDEX idx_salary ON employees;
+```
+
+**Index Types:**
+
+| Type | Use Case | Performance |
+|------|----------|-------------|
+| **B-Tree** | Range queries, ORDER BY, equality | O(log n) |
+| **Hash** | Equality lookups only | O(1) average |
+
+**Programmatic Usage:**
+
+```rust
+use query_index::{BTreeIndex, HashIndex, IndexManager};
+
+// Create index manager
+let mut manager = IndexManager::new();
+
+// Create and build a B-Tree index
+let btree = BTreeIndex::new("idx_salary");
+btree.build(&salary_column)?;
+
+// Create and build a Hash index
+let hash = HashIndex::new("idx_email");
+hash.build(&email_column)?;
+
+// Lookup values
+let row_ids = btree.range_scan(&start_value, &end_value)?;
+let row_ids = hash.lookup(&value)?;
+```
+
+### Distributed Execution
+
+Query Engine supports distributed query execution across multiple workers:
+
+```rust
+use query_distributed::{
+    Coordinator, Worker, DistributedExecutor,
+    Partitioner, PartitionStrategy, FaultManager
+};
+use std::sync::Arc;
+
+// Create coordinator node
+let coordinator = Arc::new(Coordinator::default());
+
+// Register worker nodes
+coordinator.register_worker("worker1:50051")?;
+coordinator.register_worker("worker2:50051")?;
+coordinator.register_worker("worker3:50051")?;
+
+// Check cluster status
+let status = coordinator.cluster_status();
+println!("Active workers: {}", status.active_workers);
+
+// Create distributed executor
+let executor = DistributedExecutor::new(Arc::clone(&coordinator));
+
+// Execute distributed query
+let results = executor.execute(&logical_plan).await?;
+```
+
+**Partitioning Strategies:**
+
+```rust
+// Hash partitioning (for joins and aggregations)
+let partitioner = Partitioner::hash(vec!["customer_id".into()], 4);
+
+// Range partitioning (for sorted data)
+let partitioner = Partitioner::range("date", vec![
+    RangeBoundary::Int64(1000),
+    RangeBoundary::Int64(2000),
+]);
+
+// Round-robin (even distribution)
+let partitioner = Partitioner::round_robin(3);
+
+// Partition data
+let partitions = partitioner.partition(&record_batches)?;
+```
+
+**Architecture:**
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      Coordinator                            │
+│  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐       │
+│  │DistPlanner   │ │TaskScheduler │ │FaultManager  │       │
+│  └──────────────┘ └──────────────┘ └──────────────┘       │
+└─────────────────────────────────────────────────────────────┘
+                           │
+              ┌────────────┼────────────┐
+              ▼            ▼            ▼
+        ┌──────────┐ ┌──────────┐ ┌──────────┐
+        │ Worker 1 │ │ Worker 2 │ │ Worker 3 │
+        │Partition0│ │Partition1│ │Partition2│
+        └──────────┘ └──────────┘ └──────────┘
+```
+
+**Fault Tolerance:**
+
+```rust
+// Configure fault tolerance
+let fault_config = FaultConfig {
+    max_task_retries: 3,
+    worker_failure_threshold: 3,
+    enable_checkpoints: true,
+    ..Default::default()
+};
+
+let fault_manager = FaultManager::new(fault_config);
+
+// Handle task failures with automatic retry
+let action = fault_manager.handle_task_failure(task, worker_id, error);
+match action {
+    TaskRecoveryAction::Retry { delay_ms } => { /* retry after delay */ }
+    TaskRecoveryAction::Fail { reason } => { /* abort query */ }
+}
+```
+
 ## 📖 Examples
+
 
 ### Example 1: Basic Queries
 
@@ -573,18 +716,32 @@ cargo test -p query-parser
 
 ### Running Examples
 
-```
+```bash
 # Simple query example
 cargo run --example simple_query
 
 # Aggregate query example
 cargo run --example aggregate_query
 
-# JOIN query example (NEW!)
+# JOIN query example
 cargo run --example join_query
+
+# Window function example
+cargo run --example window_function_query
+
+# User-defined functions example
+cargo run --example udf_query
+
+# Index operations example
+cargo run --example index_query
+
+# Distributed execution example
+cargo run --example distributed_query
 
 # Full demo
 cargo run --example full_query_demo
+```
+
 ```
 
 ### Code Quality
@@ -675,7 +832,7 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 - [x] ~~Window functions~~ ✅ **Completed!**
 - [x] ~~User-defined functions (UDFs)~~ ✅ **Completed!**
 - [x] ~~Index support~~ ✅ **Completed!**
-- [ ] Distributed execution
+- [x] ~~Distributed execution~~ ✅ **Completed!**
 - [ ] Query caching
 - [ ] Real-time streaming queries
 - [ ] PostgreSQL protocol compatibility
@@ -688,7 +845,15 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 **Stability**: Alpha
 
 ### Recently Completed
-- ✅ **Index Support** (NEW!)
+- ✅ **Distributed Execution** (NEW!)
+  - Coordinator/Worker architecture
+  - Hash, Range, and Round-Robin partitioning strategies
+  - Task scheduling and load balancing
+  - Multi-stage query execution plans
+  - Exchange and Merge operators for shuffles
+  - Fault tolerance with retry and checkpointing
+  - 42 unit tests
+- ✅ **Index Support**
   - B-Tree indexes for range queries and equality
   - Hash indexes for fast O(1) equality lookups
   - `CREATE INDEX` and `DROP INDEX` SQL syntax
@@ -713,6 +878,8 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 - ✅ Table aliases and qualified column names
 - ✅ Multiple JOIN operations in single query
 - ✅ JOIN with WHERE, GROUP BY, ORDER BY clauses
+
+
 
 ---
 

@@ -742,11 +742,9 @@ cargo run --example distributed_query
 cargo run --example full_query_demo
 ```
 
-```
-
 ### Code Quality
 
-```
+```bash
 # Format code
 cargo fmt
 

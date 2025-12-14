@@ -1,10 +1,10 @@
 [workspace]
 resolver = "2"
-members = ["crates/query-cache", "crates/query-cli", "crates/query-core", "crates/query-distributed", "crates/query-executor", "crates/query-index", "crates/query-parser", "crates/query-planner", "crates/query-storage", "examples-package"]
+members = ["crates/query-cache", "crates/query-cli", "crates/query-core", "crates/query-distributed", "crates/query-executor", "crates/query-index", "crates/query-parser", "crates/query-planner", "crates/query-storage", "crates/query-streaming", "examples-package"]
 
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 authors = ["Darshan vichhi"]
 license = "Apache-2.0"

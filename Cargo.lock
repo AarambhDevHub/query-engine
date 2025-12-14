@@ -1510,7 +1510,7 @@ dependencies = [
 
 [[package]]
 name = "query-cache"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ahash",
  "arrow",
@@ -1522,7 +1522,7 @@ dependencies = [
 
 [[package]]
 name = "query-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "arrow",
@@ -1551,7 +1551,7 @@ dependencies = [
 
 [[package]]
 name = "query-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ahash",
  "arrow",
@@ -1564,7 +1564,7 @@ dependencies = [
 
 [[package]]
 name = "query-distributed"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "arrow",
  "async-trait",
@@ -1583,10 +1583,11 @@ dependencies = [
 
 [[package]]
 name = "query-engine-examples"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "arrow",
+ "query-cache",
  "query-core",
  "query-distributed",
  "query-executor",
@@ -1594,12 +1595,13 @@ dependencies = [
  "query-parser",
  "query-planner",
  "query-storage",
+ "query-streaming",
  "tokio",
 ]
 
 [[package]]
 name = "query-executor"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ahash",
  "arrow",
@@ -1610,13 +1612,14 @@ dependencies = [
  "query-core",
  "query-parser",
  "query-planner",
+ "query-streaming",
  "rayon",
  "tokio",
 ]
 
 [[package]]
 name = "query-index"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ahash",
  "arrow",
@@ -1628,7 +1631,7 @@ dependencies = [
 
 [[package]]
 name = "query-parser"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "query-core",
  "thiserror",
@@ -1636,7 +1639,7 @@ dependencies = [
 
 [[package]]
 name = "query-planner"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "arrow",
  "query-core",
@@ -1645,7 +1648,7 @@ dependencies = [
 
 [[package]]
 name = "query-storage"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "arrow",
  "async-trait",
@@ -1653,6 +1656,18 @@ dependencies = [
  "query-core",
  "query-executor",
  "query-index",
+ "tokio",
+]
+
+[[package]]
+name = "query-streaming"
+version = "0.2.0"
+dependencies = [
+ "arrow",
+ "async-trait",
+ "futures",
+ "parking_lot",
+ "query-core",
  "tokio",
 ]
 

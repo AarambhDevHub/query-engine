@@ -2,9 +2,7 @@
 
 Query Engine development roadmap and planned features.
 
-## ✅ Completed
-
-### v0.1.0 (Current)
+## ✅ v0.1.0 (Completed)
 
 | Feature | Status | Description |
 |---------|--------|-------------|
@@ -19,22 +17,18 @@ Query Engine development roadmap and planned features.
 
 ---
 
-## 🚧 In Progress
+## ✅ v0.2.0 (Current)
 
-### v0.2.0 (Planned)
-
-| Feature | Priority | Description |
-|---------|----------|-------------|
-| Real-time Streaming | High | Stream processing for live data |
-| Arrow Flight | High | Network data transfer protocol |
-| PostgreSQL Protocol | Medium | Wire-compatible with psql clients |
-| Web UI Dashboard | Medium | Browser-based query interface |
+| Feature | Status | Priority | Description |
+|---------|--------|----------|-------------|
+| Real-time Streaming | ✅ Done | High | Stream processing for live data |
+| Arrow Flight | 🚧 In Progress | High | Network data transfer protocol |
+| PostgreSQL Protocol | 🚧 In Progress | Medium | Wire-compatible with psql clients |
+| Web UI Dashboard | 🚧 In Progress | Medium | Browser-based query interface |
 
 ---
 
-## 📋 Planned
-
-### v0.3.0 (Future)
+## 📋 v0.3.0 (Planned)
 
 | Feature | Priority | Description |
 |---------|----------|-------------|
@@ -43,7 +37,9 @@ Query Engine development roadmap and planned features.
 | Cost-Based Optimizer | High | Statistics-driven query planning |
 | Parallel Query Execution | High | Multi-threaded local execution |
 
-### v0.4.0 (Long-term)
+---
+
+## 🔮 v0.4.0 (Future)
 
 | Feature | Priority | Description |
 |---------|----------|-------------|

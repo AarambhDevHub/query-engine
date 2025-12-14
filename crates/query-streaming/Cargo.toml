@@ -1,0 +1,19 @@
+[package]
+name = "query-streaming"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Real-time streaming query processing for Query Engine"
+
+[dependencies]
+query-core = { path = "../query-core" }
+arrow = { workspace = true }
+tokio = { workspace = true }
+futures = { workspace = true }
+async-trait = { workspace = true }
+parking_lot = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

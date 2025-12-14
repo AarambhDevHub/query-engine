@@ -34,6 +34,12 @@ name = "index_query"
 [[example]]
 name = "distributed_query"
 
+[[example]]
+name = "streaming_query"
+
+[[example]]
+name = "caching_query"
+
 [dependencies]
 query-core = { path = "../crates/query-core" }
 query-parser = { path = "../crates/query-parser" }
@@ -42,6 +48,8 @@ query-executor = { path = "../crates/query-executor" }
 query-storage = { path = "../crates/query-storage" }
 query-index = { path = "../crates/query-index" }
 query-distributed = { path = "../crates/query-distributed" }
+query-streaming = { path = "../crates/query-streaming" }
+query-cache = { path = "../crates/query-cache" }
 tokio = { workspace = true }
 arrow = { workspace = true }
 anyhow = { workspace = true }

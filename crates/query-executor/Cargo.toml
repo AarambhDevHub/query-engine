@@ -11,6 +11,7 @@ query-core = { path = "../query-core" }
 query-planner = { path = "../query-planner" }
 query-parser = { path = "../query-parser" }
 query-cache = { path = "../query-cache" }
+query-streaming = { path = "../query-streaming" }
 arrow.workspace = true
 async-trait.workspace = true
 tokio.workspace = true

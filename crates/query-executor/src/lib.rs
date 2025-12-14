@@ -6,3 +6,8 @@ pub mod physical_plan;
 pub use cached_executor::CachedQueryExecutor;
 pub use executor::QueryExecutor;
 pub use physical_plan::{DataSource, PhysicalPlan};
+
+// Re-export streaming types
+pub use query_streaming::{
+    self, ChannelStreamSource, MemoryStreamSource, StreamConfig, StreamSource, StreamingQuery,
+};

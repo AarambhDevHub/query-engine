@@ -118,6 +118,14 @@ qe export \
 | `.cache stats` | Show cache statistics |
 | `.cache clear` | Clear all cached entries |
 
+### Streaming
+
+| Command | Description |
+|---------|-------------|
+| `.stream` | Show streaming commands |
+| `.stream info` | Show streaming capabilities |
+| `.stream help` | Show streaming usage examples |
+
 ---
 
 ## Examples

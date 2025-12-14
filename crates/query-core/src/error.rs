@@ -43,6 +43,9 @@ pub enum QueryError {
 
     #[error("Cache error: {0}")]
     CacheError(String),
+
+    #[error("Stream error: {0}")]
+    StreamError(String),
 }
 
 impl From<parquet::errors::ParquetError> for QueryError {

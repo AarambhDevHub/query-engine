@@ -258,6 +258,38 @@ impl Repl {
                 }
                 Ok(())
             }
+            ".stream" => {
+                if parts.len() < 2 {
+                    println!("{}", "Streaming Commands:".bright_cyan().bold());
+                    println!("  .stream info      Show streaming capabilities");
+                    println!("  .stream help      Show usage examples");
+                    return Ok(());
+                }
+                match parts[1] {
+                    "info" => {
+                        println!("{}", "Streaming Query Support".bright_cyan().bold());
+                        println!("  Version:    0.2.0");
+                        println!("  Windows:    Tumbling, Sliding, Session");
+                        println!("  Sources:    Channel, Memory");
+                        println!("  Features:   Watermarks, Late event handling");
+                    }
+                    "help" => {
+                        println!("{}", "Streaming Usage".bright_cyan().bold());
+                        println!();
+                        println!("  Streaming queries process continuous data streams.");
+                        println!("  Use the query_streaming crate directly in Rust code:");
+                        println!();
+                        println!("  let (tx, source) = ChannelStreamSource::new(100);");
+                        println!("  let query = StreamingQuery::new(source, StreamConfig::default());");
+                        println!();
+                        println!("  See docs/STREAMING_GUIDE.md for details.");
+                    }
+                    _ => {
+                        anyhow::bail!("Unknown stream command. Use: info, help");
+                    }
+                }
+                Ok(())
+            }
             _ => {
                 anyhow::bail!(
                     "Unknown command: {}. Type .help for available commands",

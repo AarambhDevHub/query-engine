@@ -19,6 +19,7 @@ A high-performance, production-ready SQL query engine built in Rust with Apache 
 - **🌐 Distributed Execution**: Coordinator/Worker architecture with partitioning and fault tolerance
 - **📁 Multiple Data Sources**: CSV, Parquet, and in-memory tables
 - **🎯 Query Optimization**: Predicate pushdown and logical plan optimization
+- **🚀 Query Caching**: LRU cache with TTL for repeated queries
 - **💻 Interactive CLI**: Full-featured REPL with syntax highlighting and history
 - **🏗️ Modular Architecture**: Clean workspace structure with separated concerns
 - **🔧 Production Ready**: Optimized compilation, comprehensive error handling
@@ -831,7 +832,7 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 - [x] ~~User-defined functions (UDFs)~~ ✅ **Completed!**
 - [x] ~~Index support~~ ✅ **Completed!**
 - [x] ~~Distributed execution~~ ✅ **Completed!**
-- [ ] Query caching
+- [x] ~~Query caching~~ ✅ **Completed!**
 - [ ] Real-time streaming queries
 - [ ] PostgreSQL protocol compatibility
 - [ ] Web UI dashboard

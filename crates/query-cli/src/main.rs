@@ -193,8 +193,7 @@ fn init_logging(verbose: bool) -> Result<()> {
 
     tracing_subscriber::registry()
         .with(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| filter.into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| filter.into()),
         )
         .with(tracing_subscriber::fmt::layer())
         .init();
@@ -203,14 +202,21 @@ fn init_logging(verbose: bool) -> Result<()> {
 }
 
 fn print_banner() {
-    println!("{}", r#"
+    println!(
+        "{}",
+        r#"
    ___                          _____            _
   / _ \ _   _  ___ _ __ _   _  | ____|_ __   __ _(_)_ __   ___
  | | | | | | |/ _ \ '__| | | | |  _| | '_ \ / _` | | '_ \ / _ \
  | |_| | |_| |  __/ |  | |_| | | |___| | | | (_| | | | | |  __/
   \__\_\\__,_|\___|_|   \__, | |_____|_| |_|\__, |_|_| |_|\___|
                         |___/               |___/
-    "#.bright_cyan());
-    println!("{}", "High-Performance SQL Query Engine v0.1.0".bright_yellow());
+    "#
+        .bright_cyan()
+    );
+    println!(
+        "{}",
+        "High-Performance SQL Query Engine v0.1.0".bright_yellow()
+    );
     println!("{}", "Type 'help' for available commands\n".bright_black());
 }

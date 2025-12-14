@@ -10,6 +10,7 @@ repository.workspace = true
 query-core = { path = "../query-core" }
 query-planner = { path = "../query-planner" }
 query-parser = { path = "../query-parser" }
+query-cache = { path = "../query-cache" }
 arrow.workspace = true
 async-trait.workspace = true
 tokio.workspace = true
@@ -17,3 +18,4 @@ rayon.workspace = true
 futures.workspace = true
 parking_lot.workspace = true
 ahash.workspace = true
+

@@ -110,6 +110,14 @@ qe export \
 | `.clear` | Clear screen |
 | `.quit` / `.exit` | Exit REPL |
 
+### Cache Management
+
+| Command | Description |
+|---------|-------------|
+| `.cache` | Show cache statistics |
+| `.cache stats` | Show cache statistics |
+| `.cache clear` | Clear all cached entries |
+
 ---
 
 ## Examples
@@ -227,6 +235,31 @@ qe> DROP INDEX idx_salary;
 ✓ Dropped index 'idx_salary'
 ```
 
+### Cache Management
+
+```bash
+qe> .cache stats
+
+Query Cache Statistics
+
++----------------+---------+
+| Metric         | Value   |
++================+=========+
+| Enabled        | Yes     |
+| Entries        | 5       |
+| Memory Used    | 2048 bytes |
+| Total Requests | 12      |
+| Hits           | 7       |
+| Misses         | 5       |
+| Hit Rate       | 58.3%   |
+| Evictions      | 0       |
+| Expirations    | 0       |
++----------------+---------+
+
+qe> .cache clear
+✓ Cache cleared
+```
+
 ### Multi-line Queries
 
 Queries can span multiple lines (end with semicolon):
@@ -302,3 +335,4 @@ Hint: Use .describe users to see available columns
 3. **Check plan**: `.plan` shows optimization opportunities
 4. **Time queries**: `.timing` for performance insights
 5. **Multi-line**: Complex queries work across lines
+6. **Monitor cache**: `.cache stats` to check cache hit rates

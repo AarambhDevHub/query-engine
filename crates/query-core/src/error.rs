@@ -40,6 +40,9 @@ pub enum QueryError {
 
     #[error("Unique constraint violation: {0}")]
     UniqueConstraintViolation(String),
+
+    #[error("Cache error: {0}")]
+    CacheError(String),
 }
 
 impl From<parquet::errors::ParquetError> for QueryError {

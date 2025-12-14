@@ -3,6 +3,7 @@ use anyhow::{Context, Result};
 use colored::Colorize;
 use comfy_table::{Cell, Color, Table as ComfyTable};
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+use query_cache::{CacheConfig, QueryCache};
 use query_core::{DataType, Field, Schema};
 use query_executor::QueryExecutor;
 use query_index::IndexManager;
@@ -29,6 +30,8 @@ pub struct Repl {
     history_file: PathBuf,
     /// Global index manager for all tables
     index_manager: Arc<IndexManager>,
+    /// Query cache for repeated queries
+    cache: Arc<QueryCache>,
 }
 
 struct TableInfo {
@@ -61,6 +64,7 @@ impl Repl {
             tables: HashMap::new(),
             history_file,
             index_manager: Arc::new(IndexManager::new()),
+            cache: Arc::new(QueryCache::new(CacheConfig::default())),
         })
     }
 
@@ -220,6 +224,38 @@ impl Repl {
             ".indexes" => {
                 let table_name = parts.get(1).map(|s| *s);
                 self.show_indexes(table_name);
+                Ok(())
+            }
+            ".cache" => {
+                if parts.len() < 2 {
+                    self.show_cache_stats();
+                    return Ok(());
+                }
+                match parts[1] {
+                    "stats" => {
+                        self.show_cache_stats();
+                    }
+                    "clear" => {
+                        self.cache.clear();
+                        println!("{} Cache cleared", "✓".bright_green());
+                        use std::io::Write;
+                        let _ = std::io::stdout().flush();
+                    }
+                    "enable" => {
+                        println!(
+                            "{} Cache is {}",
+                            "→".bright_blue(),
+                            if self.cache.is_enabled() {
+                                "enabled".bright_green()
+                            } else {
+                                "disabled".bright_red()
+                            }
+                        );
+                    }
+                    _ => {
+                        anyhow::bail!("Unknown cache command. Use: stats, clear");
+                    }
+                }
                 Ok(())
             }
             _ => {
@@ -517,6 +553,8 @@ impl Repl {
             (".timing", "Toggle query timing display"),
             (".plan", "Toggle query plan display"),
             (".format <type>", "Set output format (table|json|csv)"),
+            (".indexes [table]", "List indexes"),
+            (".cache [stats|clear]", "Show cache stats or clear cache"),
         ];
 
         for (cmd, desc) in commands {
@@ -734,6 +772,41 @@ impl Repl {
             "✓".bright_green(),
             filtered.len()
         );
+        println!("{}", table);
+    }
+
+    fn show_cache_stats(&self) {
+        let stats = self.cache.stats();
+
+        println!();
+        println!("{}", "Query Cache Statistics".bright_yellow().bold());
+        println!();
+
+        let mut table = ComfyTable::new();
+        table.set_header(vec![
+            Cell::new("Metric").fg(Color::Cyan),
+            Cell::new("Value").fg(Color::Green),
+        ]);
+
+        table.add_row(vec![
+            "Enabled",
+            if self.cache.is_enabled() { "Yes" } else { "No" },
+        ]);
+        table.add_row(vec!["Entries", &stats.entry_count().to_string()]);
+        table.add_row(vec![
+            "Memory Used",
+            &format!("{} bytes", stats.memory_bytes()),
+        ]);
+        table.add_row(vec!["Total Requests", &stats.total_requests().to_string()]);
+        table.add_row(vec!["Hits", &stats.hits().to_string()]);
+        table.add_row(vec!["Misses", &stats.misses().to_string()]);
+        table.add_row(vec![
+            "Hit Rate",
+            &format!("{:.1}%", stats.hit_rate() * 100.0),
+        ]);
+        table.add_row(vec!["Evictions", &stats.evictions().to_string()]);
+        table.add_row(vec!["Expirations", &stats.expirations().to_string()]);
+
         println!("{}", table);
     }
 

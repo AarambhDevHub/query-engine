@@ -4,7 +4,7 @@ All notable changes to Query Engine are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [0.1.0] - 2024-12-14
+## [0.1.0] - 2025-12-14
 
 ### Added
 
@@ -68,4 +68,4 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| 0.1.0 | 2024-12-14 | Initial release with caching, distributed execution, indexes |
+| 0.1.0 | 2025-12-14 | Initial release with caching, distributed execution, indexes |

@@ -215,7 +215,18 @@ impl QueryCache {
         }
 
         *memory_used += entry_size;
-        self.update_stats(&cache);
+
+        // Capture values before releasing locks
+        let entry_count = cache.len() as u64;
+        let mem_bytes = *memory_used as u64;
+
+        // Release locks
+        drop(memory_used);
+        drop(cache);
+
+        // Update stats without holding locks
+        self.stats.set_entry_count(entry_count);
+        self.stats.set_memory_bytes(mem_bytes);
     }
 
     /// Remove an entry from the cache

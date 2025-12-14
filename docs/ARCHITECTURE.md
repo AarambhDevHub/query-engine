@@ -55,6 +55,7 @@ query-engine/
 │   ├── query-storage/      # Data sources
 │   ├── query-index/        # Index implementations
 │   ├── query-cache/        # Query result caching
+│   ├── query-streaming/    # Real-time stream processing
 │   ├── query-distributed/  # Distributed execution
 │   └── query-cli/          # CLI interface
 └── examples-package/       # Usage examples
@@ -237,7 +238,25 @@ LRU-based result caching for repeated queries:
 - `CacheStats`: Atomic counters for metrics
 - `CacheInvalidator`: Trait for data change notifications
 
-### 10. Query CLI (`query-cli`)
+### 10. Query Streaming (`query-streaming`)
+
+Real-time stream processing for continuous data:
+
+**Features:**
+- **StreamSource trait**: Async iterator over RecordBatch
+- **Window Types**: Tumbling, Sliding, Session windows
+- **Watermarks**: Event-time processing with late event handling
+- **Stream Control**: Pause, resume, stop operations
+
+**Components:**
+- `StreamingQuery`: Main stream processor
+- `StreamConfig`: Batch size, window, watermark interval
+- `ChannelStreamSource`: Tokio channel-based input
+- `MemoryStreamSource`: In-memory testing source
+- `Watermark`: Event-time tracking
+- `LateEventPolicy`: Drop, SideOutput, or Allow
+
+### 11. Query CLI (`query-cli`)
 
 Interactive command-line interface:
 

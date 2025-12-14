@@ -21,6 +21,8 @@ cargo run --example <example_name>
 | `full_query_demo` | End-to-end workflow |
 | `index_query` | Index creation and usage |
 | `distributed_query` | Distributed execution |
+| `streaming_query` | Real-time stream processing |
+| `caching_query` | Query result caching |
 
 ---
 
@@ -341,6 +343,73 @@ for batch in results {
 ```
 
 Run: `cargo run --example full_query_demo`
+
+---
+
+## Streaming
+
+### streaming_query
+
+```rust
+use query_streaming::{
+    StreamingQuery, StreamConfig, ChannelStreamSource,
+    MemoryStreamSource, WindowType
+};
+
+// Memory-based stream
+let source = MemoryStreamSource::new(vec![batch1, batch2]);
+let mut query = StreamingQuery::new(source, StreamConfig::default());
+
+while let Some(result) = query.next().await {
+    let batch = result?;
+    println!("Received {} rows", batch.num_rows());
+}
+
+// Channel-based stream
+let (tx, source) = ChannelStreamSource::new(100);
+let config = StreamConfig::default()
+    .with_window(WindowType::tumbling(Duration::from_secs(60)));
+
+let mut query = StreamingQuery::new(source, config);
+
+// Stream controls
+query.pause();
+query.resume();
+query.stop();
+```
+
+Run: `cargo run --example streaming_query`
+
+---
+
+## Caching
+
+### caching_query
+
+```rust
+use query_cache::{QueryCache, CacheKey, CacheConfig};
+
+// Create cache
+let cache = QueryCache::new(CacheConfig::default());
+
+// Cache result
+let key = CacheKey::from_sql("SELECT * FROM users");
+cache.put(key.clone(), vec![batch]);
+
+// Retrieve
+if let Some(batches) = cache.get(&key) {
+    println!("HIT: {} batches", batches.len());
+}
+
+// Statistics
+let stats = cache.stats();
+println!("Hit rate: {:.1}%", stats.hit_rate() * 100.0);
+
+// Clear
+cache.clear();
+```
+
+Run: `cargo run --example caching_query`
 
 ---
 

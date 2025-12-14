@@ -12,6 +12,8 @@ query-engine workspace
 ├── query-executor    # Physical execution
 ├── query-storage     # Data sources
 ├── query-index       # Index implementations
+├── query-cache       # Query result caching
+├── query-streaming   # Real-time stream processing
 ├── query-distributed # Distributed execution
 └── query-cli         # CLI interface
 ```
@@ -354,6 +356,86 @@ let partitions = partitioner.partition(&batches)?;
 
 // Round-robin
 let partitioner = Partitioner::round_robin(3);
+```
+
+---
+
+## query-cache
+
+**Purpose:** LRU-based query result caching with TTL.
+
+### Key Types
+
+```rust
+use query_cache::{QueryCache, CacheKey, CacheConfig, CacheStats};
+```
+
+#### QueryCache
+
+```rust
+// Create cache
+let config = CacheConfig::default();
+let cache = QueryCache::new(config);
+
+// Cache query result
+let key = CacheKey::from_sql("SELECT * FROM users");
+cache.put(key.clone(), vec![batch]);
+
+// Retrieve from cache
+if let Some(batches) = cache.get(&key) {
+    println!("Cache HIT: {} batches", batches.len());
+}
+
+// Get statistics
+let stats = cache.stats();
+println!("Hit rate: {:.1}%", stats.hit_rate() * 100.0);
+```
+
+---
+
+## query-streaming
+
+**Purpose:** Real-time stream processing for continuous data.
+
+### Key Types
+
+```rust
+use query_streaming::{
+    StreamingQuery, StreamConfig, StreamSource,
+    ChannelStreamSource, MemoryStreamSource,
+    WindowType, Watermark
+};
+```
+
+#### StreamingQuery
+
+```rust
+// Create channel stream
+let (tx, source) = ChannelStreamSource::new(100);
+let config = StreamConfig::default()
+    .with_batch_size(1000)
+    .with_window(WindowType::tumbling(Duration::from_secs(60)));
+
+let mut query = StreamingQuery::new(source, config);
+
+// Process stream
+while let Some(result) = query.next().await {
+    let batch = result?;
+    process(batch);
+}
+
+// Control
+query.pause();
+query.resume();
+query.stop();
+```
+
+#### Window Types
+
+```rust
+WindowType::tumbling(Duration::from_secs(60))   // Non-overlapping
+WindowType::sliding(Duration::from_secs(60), Duration::from_secs(10))  // Overlapping
+WindowType::session(Duration::from_secs(30))    // Gap-based
 ```
 
 ---

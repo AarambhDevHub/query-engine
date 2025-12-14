@@ -4,6 +4,22 @@ All notable changes to Query Engine are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.2.0] - 2025-12-14
+
+### Added
+
+#### Real-time Streaming Queries
+- **StreamSource** trait for async data streams
+- **ChannelStreamSource** for Tokio channel-based streaming
+- **MemoryStreamSource** for testing
+- **StreamingQuery** processor with pause/resume/stop controls
+- **Window Types**: Tumbling, Sliding, Session windows
+- **Watermark** support for event-time processing
+- **LateEventPolicy** for handling late data
+- **StreamConfig** with batch size, window, watermark interval
+
+---
+
 ## [0.1.0] - 2025-12-14
 
 ### Added

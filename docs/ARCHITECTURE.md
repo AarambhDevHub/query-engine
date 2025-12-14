@@ -54,6 +54,7 @@ query-engine/
 │   ├── query-executor/     # Query execution
 │   ├── query-storage/      # Data sources
 │   ├── query-index/        # Index implementations
+│   ├── query-cache/        # Query result caching
 │   ├── query-distributed/  # Distributed execution
 │   └── query-cli/          # CLI interface
 └── examples-package/       # Usage examples
@@ -68,16 +69,16 @@ query-engine/
         ▼               ▼               ▼
   query-executor  query-storage  query-distributed
         │               │               │
-        └───────┬───────┘       ┌───────┘
-                ▼               ▼
-          query-planner   query-index
-                │               │
-                └───────┬───────┘
-                        ▼
-                  query-parser
-                        │
-                        ▼
-                   query-core
+        ├───────────────┤       ┌───────┘
+        ▼               ▼       ▼
+  query-cache     query-planner   query-index
+        │               │               │
+        └───────┬───────┴───────────────┘
+                ▼
+          query-parser
+                │
+                ▼
+           query-core
 ```
 
 ## Component Details
@@ -156,6 +157,10 @@ Logical Plan → Physical Operators → Arrow RecordBatches
 - Sort (in-memory)
 - Window function executor
 
+**Caching:**
+- `CachedQueryExecutor` wrapper for transparent caching
+- Integrates with `query-cache` for LRU result caching
+
 ### 5. Query Storage (`query-storage`)
 
 Provides data source abstractions:
@@ -214,7 +219,25 @@ Distributed execution framework:
 - **Exchange/Merge**: Shuffle operators
 - **FaultManager**: Retry and recovery
 
-### 8. Query CLI (`query-cli`)
+### 9. Query Cache (`query-cache`)
+
+LRU-based result caching for repeated queries:
+
+**Features:**
+- **LRU Eviction**: Least recently used entries evicted at capacity
+- **TTL Expiration**: Time-to-live for automatic expiry (default: 5 min)
+- **Memory Limits**: Configurable max memory (default: 100MB)
+- **Thread-Safe**: `RwLock` for concurrent access
+- **Statistics**: Track hits, misses, evictions, hit rate
+
+**Components:**
+- `QueryCache`: Main cache structure
+- `CacheKey`: SQL hash-based lookup key
+- `CacheEntry`: Cached RecordBatch with metadata
+- `CacheStats`: Atomic counters for metrics
+- `CacheInvalidator`: Trait for data change notifications
+
+### 10. Query CLI (`query-cli`)
 
 Interactive command-line interface:
 
@@ -328,7 +351,7 @@ Limit (10)
 
 ## Future Architecture
 
-- **Query Caching**: LRU cache for repeated queries
 - **Streaming**: Real-time query processing
 - **Arrow Flight**: Network data transfer
 - **PostgreSQL Protocol**: Wire compatibility
+- **Cost-Based Optimizer**: Statistics-driven query planning

@@ -33,10 +33,12 @@
 
 pub mod cache;
 pub mod config;
+pub mod flight_cache;
 pub mod invalidation;
 pub mod stats;
 
 pub use cache::{CacheEntry, CacheKey, QueryCache};
 pub use config::CacheConfig;
+pub use flight_cache::flight_cache_key;
 pub use invalidation::{CacheInvalidator, InvalidationEvent, NoOpInvalidator};
 pub use stats::CacheStats;

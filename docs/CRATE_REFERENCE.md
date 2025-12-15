@@ -15,6 +15,7 @@ query-engine workspace
 ├── query-cache       # Query result caching
 ├── query-streaming   # Real-time stream processing
 ├── query-distributed # Distributed execution
+├── query-flight      # Arrow Flight server/client
 └── query-cli         # CLI interface
 ```
 
@@ -436,6 +437,69 @@ query.stop();
 WindowType::tumbling(Duration::from_secs(60))   // Non-overlapping
 WindowType::sliding(Duration::from_secs(60), Duration::from_secs(10))  // Overlapping
 WindowType::session(Duration::from_secs(30))    // Gap-based
+```
+
+---
+
+## query-flight
+
+**Purpose:** Arrow Flight server and client for network data transfer.
+
+### Key Types
+
+```rust
+use query_flight::{
+    FlightServer, FlightClient, FlightDataSource, FlightStreamSource
+};
+```
+
+#### FlightServer
+
+```rust
+// Create server
+let server = FlightServer::new();
+
+// Register tables
+server.service().register_batch("users", batch);
+
+// Start serving
+server.serve("0.0.0.0:50051".parse()?).await?;
+```
+
+#### FlightClient
+
+```rust
+// Connect to server
+let mut client = FlightClient::connect("http://localhost:50051").await?;
+
+// Execute query
+let batches = client.execute_sql("SELECT * FROM users").await?;
+
+// List tables
+let tables = client.list_tables().await?;
+
+// Get schema
+let schema = client.get_table_schema("users").await?;
+```
+
+#### FlightDataSource
+
+```rust
+use query_executor::physical_plan::DataSource;
+
+let source = FlightDataSource::new("http://localhost:50051", "users", schema);
+let batches = source.scan()?;
+```
+
+#### FlightStreamSource
+
+```rust
+use query_streaming::StreamSource;
+
+let mut stream = FlightStreamSource::new("http://localhost:50051", "users");
+while let Some(batch) = stream.next_batch().await {
+    process(batch?);
+}
 ```
 
 ---

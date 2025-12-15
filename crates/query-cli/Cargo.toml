@@ -18,8 +18,7 @@ query-executor = { path = "../query-executor" }
 query-storage = { path = "../query-storage" }
 query-index = { path = "../query-index" }
 query-cache = { path = "../query-cache" }
-
-# CLI dependencies
+query-flight = { path = "../query-flight" }
 clap = { version = "4.5", features = ["derive", "cargo"] }
 rustyline = "14.0"
 rustyline-derive = "0.10"

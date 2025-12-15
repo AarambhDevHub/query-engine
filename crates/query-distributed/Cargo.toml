@@ -11,6 +11,7 @@ description = "Distributed execution for Query Engine"
 query-core = { path = "../query-core" }
 query-planner = { path = "../query-planner" }
 query-executor = { path = "../query-executor" }
+query-flight = { path = "../query-flight" }
 arrow = { workspace = true }
 tokio = { workspace = true }
 parking_lot = { workspace = true }

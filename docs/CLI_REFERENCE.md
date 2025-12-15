@@ -79,6 +79,46 @@ qe export \
     --format parquet
 ```
 
+### Flight Server
+
+Start Arrow Flight server:
+
+```bash
+# Start on default port 50051
+qe flight-server
+
+# Load CSV files as tables
+qe flight-server --load users=data/users.csv --load orders=data/orders.csv
+
+# Custom host/port
+qe flight-server --host 127.0.0.1 --port 8080
+```
+
+**Options:**
+- `-p, --port <PORT>` - Port to listen on (default: 50051)
+- `-H, --host <HOST>` - Host to bind (default: 0.0.0.0)
+- `-l, --load <NAME=PATH>` - Load CSV files as tables
+
+### Flight Query
+
+Query remote Flight server:
+
+```bash
+# Execute query
+qe flight-query --connect http://localhost:50051 --sql "SELECT * FROM users"
+
+# Output as JSON
+qe flight-query -c http://localhost:50051 -s "users" -o json
+
+# Output as CSV
+qe flight-query -c http://localhost:50051 -s "users" -o csv
+```
+
+**Options:**
+- `-c, --connect <URL>` - Flight server URL
+- `-s, --sql <QUERY>` - SQL query to execute
+- `-o, --output <FORMAT>` - Output format: table, json, csv
+
 ---
 
 ## REPL Commands

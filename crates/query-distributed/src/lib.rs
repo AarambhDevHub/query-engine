@@ -43,11 +43,13 @@
 //! - [`executor`]: Distributed execution orchestration
 //! - [`fault`]: Fault tolerance and recovery
 //! - [`network`]: Network communication types
+//! - [`flight_transport`]: Arrow Flight transport layer
 
 pub mod coordinator;
 pub mod error;
 pub mod executor;
 pub mod fault;
+pub mod flight_transport;
 pub mod network;
 pub mod operators;
 pub mod partition;
@@ -61,6 +63,7 @@ pub use coordinator::Coordinator;
 pub use error::DistributedError;
 pub use executor::{DistributedExecutor, ExecutorConfig, QueryExecution, QueryExecutionStatus};
 pub use fault::{FaultConfig, FaultManager, FaultStats, TaskRecoveryAction, WorkerRecoveryAction};
+pub use flight_transport::{DistributedTransport, FlightTransport};
 pub use network::{
     ClusterTopology, CoordinatorMessage, NetworkConfig, SerializedBatch, TaskExecutionRequest,
     TaskExecutionResponse, WorkerMessage,

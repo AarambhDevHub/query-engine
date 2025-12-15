@@ -1,0 +1,42 @@
+[package]
+name = "query-flight"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Arrow Flight server and client for Query Engine"
+
+[dependencies]
+query-core = { path = "../query-core" }
+query-parser = { path = "../query-parser" }
+query-planner = { path = "../query-planner" }
+query-executor = { path = "../query-executor" }
+query-storage = { path = "../query-storage" }
+query-streaming = { path = "../query-streaming" }
+
+# Arrow Flight
+arrow = { workspace = true }
+arrow-flight = "53.0"
+arrow-schema = "53.0"
+arrow-array = "53.0"
+arrow-ipc = "53.0"
+
+# gRPC
+tonic = "0.12"
+prost = "0.13"
+
+# Async
+tokio = { workspace = true }
+tokio-stream = "0.1"
+async-trait = { workspace = true }
+futures = { workspace = true }
+
+# Utils
+thiserror = { workspace = true }
+tracing = { workspace = true }
+parking_lot = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+tokio-test = "0.4"

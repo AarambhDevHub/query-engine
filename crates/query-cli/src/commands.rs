@@ -7,6 +7,7 @@ use parquet::arrow::ArrowWriter;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use parquet::file::properties::WriterProperties;
 use query_core::{DataType, Field, Schema};
+use query_executor::physical_plan::DataSource;
 use query_parser::Parser;
 use query_planner::{Optimizer, Planner};
 use query_storage::{CsvDataSource, ParquetDataSource};
@@ -537,5 +538,122 @@ fn export_to_json(batches: &[RecordBatch], output: &Path) -> Result<()> {
     }
 
     writer.finish()?;
+    Ok(())
+}
+
+/// Start an Arrow Flight server
+pub async fn start_flight_server(host: &str, port: u16, load_files: &[String]) -> Result<()> {
+    use query_flight::FlightServer;
+    use query_storage::CsvDataSource;
+    use std::net::SocketAddr;
+
+    println!(
+        "{} Starting Arrow Flight server on {}:{}",
+        "→".bright_blue(),
+        host.bright_cyan(),
+        port.to_string().bright_cyan()
+    );
+
+    let server = FlightServer::new();
+
+    // Load any specified CSV files
+    for spec in load_files {
+        if let Some((name, path)) = spec.split_once('=') {
+            let path = Path::new(path);
+            if path.exists() {
+                let schema = infer_schema_from_file(path)?;
+                let csv_source =
+                    CsvDataSource::new(path.to_str().unwrap().to_string(), schema.clone());
+                let batches = csv_source.scan()?;
+                server.service().register_table(name, schema, batches);
+                println!(
+                    "  {} Loaded table '{}' from {:?}",
+                    "✓".bright_green(),
+                    name.bright_cyan(),
+                    path
+                );
+            } else {
+                println!("  {} File not found: {:?}", "⚠".bright_yellow(), path);
+            }
+        } else {
+            println!(
+                "  {} Invalid format '{}' (expected: name=path)",
+                "⚠".bright_yellow(),
+                spec
+            );
+        }
+    }
+
+    let addr: SocketAddr = format!("{}:{}", host, port).parse()?;
+
+    println!("{} Server ready, press Ctrl+C to stop", "✓".bright_green());
+    println!();
+    println!("Connect with:");
+    println!(
+        "  {}",
+        format!(
+            "qe flight-query --connect http://{}:{} --sql \"SELECT * FROM table\"",
+            host, port
+        )
+        .bright_cyan()
+    );
+
+    server.serve(addr).await?;
+
+    Ok(())
+}
+
+/// Query a remote Flight server
+pub async fn flight_query(connect: &str, sql: &str, output_format: &str) -> Result<()> {
+    use arrow::util::pretty::print_batches;
+    use query_flight::FlightClient;
+
+    println!(
+        "{} Connecting to Flight server at {}",
+        "→".bright_blue(),
+        connect.bright_cyan()
+    );
+
+    let mut client = FlightClient::connect(connect).await?;
+
+    println!("{} Connected!", "✓".bright_green());
+    println!("{} Executing: {}", "→".bright_blue(), sql.bright_white());
+
+    let start = std::time::Instant::now();
+    let batches = client.execute_sql(sql).await?;
+    let elapsed = start.elapsed();
+
+    let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+
+    match output_format {
+        "json" => {
+            for batch in &batches {
+                let file = std::io::stdout();
+                let mut writer = arrow::json::LineDelimitedWriter::new(file);
+                writer.write(batch)?;
+                writer.finish()?;
+            }
+        }
+        "csv" => {
+            for batch in &batches {
+                let file = std::io::stdout();
+                let mut writer = arrow::csv::Writer::new(file);
+                writer.write(batch)?;
+            }
+        }
+        _ => {
+            // Default: table format
+            print_batches(&batches)?;
+        }
+    }
+
+    println!();
+    println!(
+        "{} {} rows returned in {:.2}ms",
+        "✓".bright_green(),
+        total_rows,
+        elapsed.as_secs_f64() * 1000.0
+    );
+
     Ok(())
 }

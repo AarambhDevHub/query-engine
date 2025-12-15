@@ -40,6 +40,9 @@ name = "streaming_query"
 [[example]]
 name = "caching_query"
 
+[[example]]
+name = "flight_query"
+
 [dependencies]
 query-core = { path = "../crates/query-core" }
 query-parser = { path = "../crates/query-parser" }
@@ -50,6 +53,8 @@ query-index = { path = "../crates/query-index" }
 query-distributed = { path = "../crates/query-distributed" }
 query-streaming = { path = "../crates/query-streaming" }
 query-cache = { path = "../crates/query-cache" }
+query-flight = { path = "../crates/query-flight" }
 tokio = { workspace = true }
 arrow = { workspace = true }
 anyhow = { workspace = true }
+tracing-subscriber = { workspace = true }

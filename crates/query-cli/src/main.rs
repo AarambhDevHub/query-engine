@@ -113,6 +113,36 @@ enum Commands {
         #[arg(short = 'f', long, default_value = "csv")]
         format: String,
     },
+
+    /// Start Arrow Flight server
+    FlightServer {
+        /// Port to listen on
+        #[arg(short, long, default_value = "50051")]
+        port: u16,
+
+        /// Host to bind to
+        #[arg(short = 'H', long, default_value = "0.0.0.0")]
+        host: String,
+
+        /// CSV files to load (format: name=path)
+        #[arg(short, long)]
+        load: Vec<String>,
+    },
+
+    /// Query a remote Flight server
+    FlightQuery {
+        /// Flight server URL
+        #[arg(short, long)]
+        connect: String,
+
+        /// SQL query to execute
+        #[arg(short, long)]
+        sql: String,
+
+        /// Output format (table, json, csv)
+        #[arg(short, long, default_value = "table")]
+        output: String,
+    },
 }
 
 #[tokio::main]
@@ -173,6 +203,16 @@ async fn main() -> Result<()> {
             format,
         }) => {
             export_results(&sql, &table, &input, &output, &format).await?;
+        }
+        Some(Commands::FlightServer { port, host, load }) => {
+            start_flight_server(&host, port, &load).await?;
+        }
+        Some(Commands::FlightQuery {
+            connect,
+            sql,
+            output,
+        }) => {
+            flight_query(&connect, &sql, &output).await?;
         }
         None => {
             // Default: Start REPL

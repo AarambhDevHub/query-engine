@@ -8,6 +8,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use arrow::array::RecordBatch;
+use arrow_flight::decode::FlightRecordBatchStream;
 use arrow_flight::encode::FlightDataEncoderBuilder;
 use arrow_flight::flight_service_server::{FlightService, FlightServiceServer};
 use arrow_flight::{
@@ -20,7 +21,7 @@ use futures::{StreamExt, TryStreamExt};
 use parking_lot::RwLock;
 use tonic::transport::Server;
 use tonic::{Request, Response, Status, Streaming};
-use tracing::{info, warn};
+use tracing::info;
 
 use query_core::Schema;
 use query_executor::physical_plan::DataSource;
@@ -276,12 +277,48 @@ impl FlightService for FlightServiceImpl {
         Ok(Response::new(info))
     }
 
-    /// Poll for flight info (not supported)
+    /// Poll for flight info
+    ///
+    /// Returns info immediately since queries are synchronous in this implementation.
     async fn poll_flight_info(
         &self,
-        _request: Request<FlightDescriptor>,
+        request: Request<FlightDescriptor>,
     ) -> Result<Response<PollInfo>, Status> {
-        Err(Status::unimplemented("poll_flight_info not supported"))
+        let descriptor = request.into_inner();
+
+        // Get the table name from descriptor
+        let table_name = if let Some(name) = descriptor.path.first() {
+            name.clone()
+        } else if !descriptor.cmd.is_empty() {
+            Self::extract_table_name(&String::from_utf8_lossy(&descriptor.cmd))
+        } else {
+            return Err(Status::invalid_argument("No table specified"));
+        };
+
+        // Check if table exists
+        let tables = self.tables.read();
+        let source = tables
+            .get(&table_name)
+            .ok_or_else(|| Status::not_found(format!("Table not found: {}", table_name)))?;
+
+        let schema = source.schema().to_arrow();
+        let ticket = Ticket::new(table_name.clone());
+
+        let info = FlightInfo::new()
+            .with_descriptor(descriptor.clone())
+            .try_with_schema(&schema)
+            .map_err(|e| Status::internal(e.to_string()))?
+            .with_endpoint(arrow_flight::FlightEndpoint::new().with_ticket(ticket));
+
+        // Return immediately with progress = 1.0 (complete)
+        let poll_info = PollInfo {
+            info: Some(info),
+            flight_descriptor: Some(descriptor),
+            progress: Some(1.0),
+            expiration_time: None,
+        };
+
+        Ok(Response::new(poll_info))
     }
 
     /// Get schema for a flight
@@ -343,40 +380,75 @@ impl FlightService for FlightServiceImpl {
     }
 
     /// Accept data upload (store as table)
+    ///
+    /// Receives FlightData stream, decodes RecordBatches, and stores as a table.
     async fn do_put(
         &self,
         request: Request<Streaming<FlightData>>,
     ) -> Result<Response<Self::DoPutStream>, Status> {
-        let mut stream = request.into_inner();
+        let stream = request.into_inner();
 
-        // Collect all flight data
-        let mut table_name = String::new();
+        // Collect all flight data first to extract descriptor
+        let flight_data_vec: Vec<FlightData> = stream
+            .try_collect()
+            .await
+            .map_err(|e| Status::internal(format!("Failed to collect flight data: {}", e)))?;
 
-        while let Some(data) = stream.next().await {
-            let data = data?;
-
-            // Try to get table name from descriptor
-            if let Some(descriptor) = &data.flight_descriptor {
-                if let Some(name) = descriptor.path.first() {
-                    table_name = name.clone();
-                }
-            }
-
-            // For now, just acknowledge - full implementation would decode IPC
-            if !data.data_body.is_empty() {
-                warn!("do_put data decoding not fully implemented");
-            }
+        if flight_data_vec.is_empty() {
+            return Err(Status::invalid_argument("No data provided"));
         }
 
-        if table_name.is_empty() {
-            return Err(Status::invalid_argument("No table name provided"));
+        // Extract table name from the first message's descriptor
+        let table_name = flight_data_vec
+            .iter()
+            .find_map(|data| {
+                data.flight_descriptor
+                    .as_ref()
+                    .and_then(|d| d.path.first().cloned())
+            })
+            .ok_or_else(|| Status::invalid_argument("No table name provided in descriptor"))?;
+
+        info!("Receiving upload for table: {}", table_name);
+
+        // Convert to a stream for FlightRecordBatchStream
+        let data_stream = futures::stream::iter(flight_data_vec.into_iter().map(Ok));
+
+        // Decode the FlightData into RecordBatches
+        let batch_stream = FlightRecordBatchStream::new_from_flight_data(
+            data_stream.map_err(|e: Status| arrow_flight::error::FlightError::Tonic(e)),
+        );
+
+        let batches: Vec<RecordBatch> = batch_stream
+            .try_collect()
+            .await
+            .map_err(|e| Status::internal(format!("Failed to decode record batches: {}", e)))?;
+
+        if batches.is_empty() {
+            return Err(Status::invalid_argument("No record batches in upload"));
         }
+
+        // Get schema from first batch and register the table
+        let schema = Schema::from_arrow(batches[0].schema().as_ref());
+        let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+
+        {
+            let mut tables = self.tables.write();
+            tables.register(&table_name, schema, batches);
+        }
+
+        info!("Stored table '{}' with {} rows", table_name, total_rows);
+
+        // Return success with metadata about what was stored
+        let metadata = serde_json::json!({
+            "table": table_name,
+            "rows": total_rows
+        });
 
         let result = PutResult {
-            app_metadata: Default::default(),
+            app_metadata: serde_json::to_vec(&metadata).unwrap_or_default().into(),
         };
-        let stream = stream::once(async { Ok(result) }).boxed();
-        Ok(Response::new(stream))
+        let result_stream = stream::once(async { Ok(result) }).boxed();
+        Ok(Response::new(result_stream))
     }
 
     /// Execute actions (e.g., clear cache)
@@ -434,12 +506,88 @@ impl FlightService for FlightServiceImpl {
         Ok(Response::new(stream))
     }
 
-    /// Bidirectional exchange (not supported)
+    /// Bidirectional exchange
+    ///
+    /// Receives FlightData stream, optionally stores as a table,
+    /// and echoes the decoded data back to the client.
     async fn do_exchange(
         &self,
-        _request: Request<Streaming<FlightData>>,
+        request: Request<Streaming<FlightData>>,
     ) -> Result<Response<Self::DoExchangeStream>, Status> {
-        Err(Status::unimplemented("do_exchange not supported"))
+        let stream = request.into_inner();
+
+        // Collect all incoming FlightData
+        let flight_data_vec: Vec<FlightData> = stream
+            .try_collect()
+            .await
+            .map_err(|e| Status::internal(format!("Failed to collect flight data: {}", e)))?;
+
+        if flight_data_vec.is_empty() {
+            return Err(Status::invalid_argument("No data provided for exchange"));
+        }
+
+        info!(
+            "do_exchange: received {} FlightData messages",
+            flight_data_vec.len()
+        );
+
+        // Check if client wants to store this as a table
+        let table_name = flight_data_vec.iter().find_map(|data| {
+            data.flight_descriptor
+                .as_ref()
+                .and_then(|d| d.path.first().cloned())
+        });
+
+        // Decode the incoming data into RecordBatches
+        let data_stream = futures::stream::iter(flight_data_vec.clone().into_iter().map(Ok));
+        let batch_stream = FlightRecordBatchStream::new_from_flight_data(
+            data_stream.map_err(|e: Status| arrow_flight::error::FlightError::Tonic(e)),
+        );
+
+        let batches: Vec<RecordBatch> = batch_stream
+            .try_collect()
+            .await
+            .map_err(|e| Status::internal(format!("Failed to decode record batches: {}", e)))?;
+
+        // If a table name was provided, store the data
+        if let Some(name) = &table_name {
+            if !batches.is_empty() {
+                let schema = Schema::from_arrow(batches[0].schema().as_ref());
+                let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+                {
+                    let mut tables = self.tables.write();
+                    tables.register(name, schema, batches.clone());
+                }
+                info!(
+                    "do_exchange: stored table '{}' with {} rows",
+                    name, total_rows
+                );
+            }
+        }
+
+        // Echo back the data - re-encode the batches as FlightData
+        if batches.is_empty() {
+            // If no batches, just echo back the original messages
+            let response_stream =
+                futures::stream::iter(flight_data_vec.into_iter().map(Ok)).boxed();
+            return Ok(Response::new(response_stream));
+        }
+
+        // Re-encode batches as FlightData stream
+        let schema = batches[0].schema();
+        let encoder = FlightDataEncoderBuilder::new()
+            .with_schema(schema)
+            .build(futures::stream::iter(batches.into_iter().map(Ok)));
+
+        // Collect and convert to proper stream
+        let encoded_data: Vec<FlightData> = encoder
+            .try_collect()
+            .await
+            .map_err(|e| Status::internal(format!("Failed to encode response: {}", e)))?;
+
+        let response_stream = futures::stream::iter(encoded_data.into_iter().map(Ok)).boxed();
+
+        Ok(Response::new(response_stream))
     }
 }
 

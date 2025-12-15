@@ -833,9 +833,11 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 - [x] ~~Index support~~ ✅ **Completed!**
 - [x] ~~Distributed execution~~ ✅ **Completed!**
 - [x] ~~Query caching~~ ✅ **Completed!**
-- [ ] Real-time streaming queries
+- [x] ~~Real-time streaming queries~~ ✅ **Completed!**
+- [x] ~~Arrow Flight (network data transfer)~~ ✅ **Completed!**
 - [ ] PostgreSQL protocol compatibility
 - [ ] Web UI dashboard
+- [ ] Cost-based query optimizer
 
 ## 📊 Project Status
 
@@ -844,39 +846,40 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 **Stability**: Alpha
 
 ### Recently Completed
-- ✅ **Distributed Execution** (NEW!)
+- ✅ **Arrow Flight** (NEW!)
+  - FlightServer for hosting tables via gRPC
+  - FlightClient for remote SQL execution
+  - All Flight protocol methods (do_get, do_put, do_exchange, etc.)
+  - FlightDataSource and FlightStreamSource implementations
+  - CLI commands: `flight-server` and `flight-query`
+- ✅ **Real-time Streaming**
+  - StreamSource trait for async data streams
+  - Tumbling, Sliding, and Session windows
+  - Event-time processing with watermarks
+  - Late event handling policies
+- ✅ **Query Caching**
+  - LRU-based result caching
+  - TTL expiration support
+  - Memory limits configuration
+- ✅ **Distributed Execution**
   - Coordinator/Worker architecture
   - Hash, Range, and Round-Robin partitioning strategies
   - Task scheduling and load balancing
   - Multi-stage query execution plans
   - Exchange and Merge operators for shuffles
   - Fault tolerance with retry and checkpointing
-  - 42 unit tests
 - ✅ **Index Support**
   - B-Tree indexes for range queries and equality
   - Hash indexes for fast O(1) equality lookups
   - `CREATE INDEX` and `DROP INDEX` SQL syntax
-  - IndexManager for index lifecycle management
-  - Unique constraint enforcement
-  - Multi-column index support
 - ✅ **Scalar Functions (UDFs)**
   - String: UPPER, LOWER, LENGTH, CONCAT, SUBSTRING, TRIM, REPLACE
   - Math: ABS, CEIL, FLOOR, ROUND, SQRT, POWER
-  - Null handling: COALESCE, NULLIF
 - ✅ **Window Functions**
   - ROW_NUMBER, RANK, DENSE_RANK, NTILE
   - LAG, LEAD, FIRST_VALUE, LAST_VALUE
-  - PARTITION BY and ORDER BY clauses
-  - Window frame specifications (ROWS/RANGE BETWEEN)
 - ✅ **Subqueries and CTEs**
-  - Common Table Expressions with `WITH ... AS (...)`
-  - Subqueries in FROM clause (derived tables)
-  - Scalar subqueries in SELECT
-  - IN and EXISTS subqueries in WHERE
 - ✅ Full JOIN support (INNER, LEFT, RIGHT, FULL OUTER, CROSS)
-- ✅ Table aliases and qualified column names
-- ✅ Multiple JOIN operations in single query
-- ✅ JOIN with WHERE, GROUP BY, ORDER BY clauses
 
 
 

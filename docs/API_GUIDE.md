@@ -13,7 +13,8 @@ query-planner = { path = "crates/query-planner" }
 query-executor = { path = "crates/query-executor" }
 query-storage = { path = "crates/query-storage" }
 query-index = { path = "crates/query-index" }
-arrow = "54"
+query-flight = { path = "crates/query-flight" }
+arrow = "53"
 ```
 
 ## Basic Query Execution
@@ -245,6 +246,79 @@ let mut buf = Vec::new();
     }
 }
 let csv = String::from_utf8(buf)?;
+```
+
+## Arrow Flight (Network)
+
+Use Arrow Flight for high-performance network data transfer between Query Engine instances:
+
+### Start Server
+
+```rust
+use query_flight::FlightServer;
+use query_core::Schema;
+use std::net::SocketAddr;
+
+let server = FlightServer::new();
+
+// Register tables
+server.service().register_table("users", schema, batches);
+
+// Or register from a single batch
+server.service().register_batch("orders", record_batch);
+
+// Start serving
+let addr: SocketAddr = "0.0.0.0:50051".parse()?;
+server.serve(addr).await?;
+```
+
+### Client Operations
+
+```rust
+use query_flight::FlightClient;
+
+let mut client = FlightClient::connect("http://localhost:50051").await?;
+
+// Execute SQL query
+let results = client.execute_sql("SELECT * FROM users").await?;
+
+// List available tables
+let tables = client.list_tables().await?;
+
+// Get table schema
+let schema = client.get_table_schema("users").await?;
+
+// Upload data to server
+let rows = client.upload_table("new_table", batches).await?;
+
+// Bidirectional exchange
+let response = client.exchange(Some("stored_name"), batches).await?;
+```
+
+### Flight as DataSource
+
+```rust
+use query_flight::FlightDataSource;
+use query_executor::physical_plan::DataSource;
+
+// Create with known schema
+let source = FlightDataSource::new("http://localhost:50051", "users", schema);
+let batches = source.scan()?;
+
+// Or connect and auto-fetch schema
+let source = FlightDataSource::connect("http://localhost:50051", "users").await?;
+```
+
+### Flight Streaming
+
+```rust
+use query_flight::FlightStreamSource;
+use query_streaming::StreamSource;
+
+let mut stream = FlightStreamSource::new("http://localhost:50051", "users");
+while let Some(batch) = stream.next_batch().await {
+    process(batch?);
+}
 ```
 
 ## Distributed Execution

@@ -57,6 +57,7 @@ query-engine/
 │   ├── query-cache/        # Query result caching
 │   ├── query-streaming/    # Real-time stream processing
 │   ├── query-distributed/  # Distributed execution
+│   ├── query-flight/       # Arrow Flight server/client
 │   └── query-cli/          # CLI interface
 └── examples-package/       # Usage examples
 ```
@@ -219,6 +220,57 @@ Distributed execution framework:
 - **Partitioner**: Data distribution (Hash, Range, Round-Robin)
 - **Exchange/Merge**: Shuffle operators
 - **FaultManager**: Retry and recovery
+- **FlightTransport**: Arrow Flight-based network transport
+
+### 8. Query Flight (`query-flight`)
+
+Apache Arrow Flight integration for network data transfer:
+
+```
+┌────────────────────────────────────────────────────┐
+│                 FlightServer                        │
+│  ┌──────────────┐  ┌──────────────┐               │
+│  │ TableStore   │  │ FlightService│               │
+│  │ (in-memory)  │  │ (gRPC impl)  │               │
+│  └──────────────┘  └──────────────┘               │
+└────────────────────────────────────────────────────┘
+          │                   ▲
+          │    gRPC/Flight    │
+          ▼                   │
+┌────────────────────────────────────────────────────┐
+│                 FlightClient                        │
+│  execute_sql, upload_table, exchange, list_tables  │
+└────────────────────────────────────────────────────┘
+```
+
+**Server Features:**
+- Register tables and serve via gRPC
+- Execute SQL queries over the network
+- All Flight protocol methods implemented
+
+**Client Features:**
+- `execute_sql()`: Query remote tables
+- `upload_table()`: Upload RecordBatches to server
+- `exchange()`: Bidirectional data streaming
+- `list_tables()`, `get_table_schema()`
+
+**Data Sources:**
+- `FlightDataSource`: Use remote Flight server as DataSource
+- `FlightStreamSource`: Stream data from Flight servers
+
+**Protocol Methods:**
+| Method | Status | Description |
+|--------|--------|-------------|
+| handshake | ✅ | Authentication (no-op) |
+| list_flights | ✅ | List available tables |
+| get_flight_info | ✅ | Get query/table info |
+| get_schema | ✅ | Get table schema |
+| do_get | ✅ | Execute query, stream results |
+| do_put | ✅ | Upload data as table |
+| do_action | ✅ | clear_tables, list_tables |
+| list_actions | ✅ | List available actions |
+| poll_flight_info | ✅ | Poll query status |
+| do_exchange | ✅ | Bidirectional streaming |
 
 ### 9. Query Cache (`query-cache`)
 
@@ -370,7 +422,7 @@ Limit (10)
 
 ## Future Architecture
 
-- **Streaming**: Real-time query processing
-- **Arrow Flight**: Network data transfer
+- **Streaming**: Real-time query processing ✅ (implemented)
+- **Arrow Flight**: Network data transfer ✅ (fully implemented)
 - **PostgreSQL Protocol**: Wire compatibility
 - **Cost-Based Optimizer**: Statistics-driven query planning

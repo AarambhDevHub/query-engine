@@ -177,6 +177,121 @@ impl FlightClient {
 
         Ok(flights)
     }
+
+    /// Upload a table to the Flight server
+    ///
+    /// Encodes the given RecordBatches as FlightData and sends them to the server.
+    /// The server will store them as a table with the given name.
+    pub async fn upload_table(
+        &mut self,
+        table_name: &str,
+        batches: Vec<RecordBatch>,
+    ) -> Result<usize, FlightError> {
+        use arrow_flight::FlightDescriptor;
+        use arrow_flight::encode::FlightDataEncoderBuilder;
+
+        if batches.is_empty() {
+            return Ok(0);
+        }
+
+        info!(
+            "Uploading table '{}' with {} batches",
+            table_name,
+            batches.len()
+        );
+
+        let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+        let schema = batches[0].schema();
+
+        // Create descriptor with table name
+        let descriptor = FlightDescriptor::new_path(vec![table_name.to_string()]);
+
+        // Encode batches as FlightData
+        let encoder = FlightDataEncoderBuilder::new()
+            .with_schema(schema)
+            .with_flight_descriptor(Some(descriptor))
+            .build(futures::stream::iter(batches.into_iter().map(Ok)));
+
+        // Collect the encoded FlightData, handling any encoding errors
+        let flight_data_vec: Vec<arrow_flight::FlightData> = encoder
+            .try_collect()
+            .await
+            .map_err(|e| FlightError::ExecutionError(format!("Failed to encode data: {}", e)))?;
+
+        // Send to server as a stream
+        let response = self
+            .client
+            .do_put(futures::stream::iter(flight_data_vec))
+            .await?;
+        let mut stream = response.into_inner();
+
+        // Consume response
+        while stream.message().await?.is_some() {}
+
+        info!("Uploaded {} rows to table '{}'", total_rows, table_name);
+        Ok(total_rows)
+    }
+
+    /// Exchange data with the Flight server (bidirectional)
+    ///
+    /// Sends RecordBatches to the server and receives the response back.
+    /// If a table_name is provided, the server will also store the data.
+    pub async fn exchange(
+        &mut self,
+        table_name: Option<&str>,
+        batches: Vec<RecordBatch>,
+    ) -> Result<Vec<RecordBatch>, FlightError> {
+        use arrow_flight::FlightDescriptor;
+        use arrow_flight::encode::FlightDataEncoderBuilder;
+
+        if batches.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        info!(
+            "Exchanging {} batches{}",
+            batches.len(),
+            table_name
+                .map(|n| format!(" (storing as '{}')", n))
+                .unwrap_or_default()
+        );
+
+        let schema = batches[0].schema();
+
+        // Optionally add descriptor with table name
+        let mut encoder_builder = FlightDataEncoderBuilder::new().with_schema(schema.clone());
+
+        if let Some(name) = table_name {
+            let descriptor = FlightDescriptor::new_path(vec![name.to_string()]);
+            encoder_builder = encoder_builder.with_flight_descriptor(Some(descriptor));
+        }
+
+        // Encode batches as FlightData
+        let encoder = encoder_builder.build(futures::stream::iter(batches.into_iter().map(Ok)));
+
+        let flight_data_vec: Vec<arrow_flight::FlightData> = encoder
+            .try_collect()
+            .await
+            .map_err(|e| FlightError::ExecutionError(format!("Failed to encode data: {}", e)))?;
+
+        // Call do_exchange
+        let response = self
+            .client
+            .do_exchange(futures::stream::iter(flight_data_vec))
+            .await?;
+
+        // Decode response
+        let stream = response.into_inner();
+        let mapped_stream = stream.map_err(arrow_flight::error::FlightError::Tonic);
+        let batch_stream = FlightRecordBatchStream::new_from_flight_data(mapped_stream);
+
+        let result_batches: Vec<RecordBatch> = batch_stream.try_collect().await.map_err(|e| {
+            FlightError::ExecutionError(format!("Failed to decode response: {}", e))
+        })?;
+
+        info!("Exchange returned {} batches", result_batches.len());
+        Ok(result_batches)
+    }
 }
 
 #[cfg(test)]

@@ -4,9 +4,23 @@ All notable changes to Query Engine are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [0.2.0] - 2025-12-14
+## [0.2.0] - 2025-12-15
 
 ### Added
+
+#### Arrow Flight Integration
+- **FlightServer** for hosting tables via gRPC Flight protocol
+- **FlightClient** for remote SQL query execution
+- **All Flight methods** implemented:
+  - `do_get`: Execute query and stream results
+  - `do_put`: Upload RecordBatches as tables
+  - `do_exchange`: Bidirectional data streaming
+  - `poll_flight_info`: Query status polling
+  - `list_flights`, `get_flight_info`, `get_schema`
+  - `do_action`, `list_actions`, `handshake`
+- **FlightDataSource**: Use remote Flight server as DataSource trait impl
+- **FlightStreamSource**: Stream data from Flight servers
+- **CLI Commands**: `flight-server` and `flight-query`
 
 #### Real-time Streaming Queries
 - **StreamSource** trait for async data streams
@@ -84,4 +98,5 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 0.2.0 | 2025-12-15 | Arrow Flight, Real-time streaming |
 | 0.1.0 | 2025-12-14 | Initial release with caching, distributed execution, indexes |

@@ -657,3 +657,54 @@ pub async fn flight_query(connect: &str, sql: &str, output_format: &str) -> Resu
 
     Ok(())
 }
+
+/// Start a PostgreSQL-compatible server
+pub async fn start_pg_server(host: &str, port: u16, load_files: &[String]) -> Result<()> {
+    use query_pgwire::PgServer;
+    use std::path::Path;
+
+    println!(
+        "{} Starting PostgreSQL server on {}:{}",
+        "→".bright_blue(),
+        host.bright_cyan(),
+        port.to_string().bright_cyan()
+    );
+
+    let server = PgServer::new(host, port);
+
+    // Load any specified CSV files
+    for spec in load_files {
+        if let Some((name, path)) = spec.split_once('=') {
+            let path_obj = Path::new(path);
+            if path_obj.exists() {
+                server.load_csv(path, name).await?;
+                println!(
+                    "  {} Loaded table '{}' from {:?}",
+                    "✓".bright_green(),
+                    name.bright_cyan(),
+                    path
+                );
+            } else {
+                println!("  {} File not found: {:?}", "⚠".bright_yellow(), path);
+            }
+        } else {
+            println!(
+                "  {} Invalid format '{}' (expected: name=path)",
+                "⚠".bright_yellow(),
+                spec
+            );
+        }
+    }
+
+    println!("{} Server ready, press Ctrl+C to stop", "✓".bright_green());
+    println!();
+    println!("Connect with:");
+    println!(
+        "  {}",
+        format!("psql -h {} -p {} -U postgres -d query_engine", host, port).bright_cyan()
+    );
+
+    server.start().await?;
+
+    Ok(())
+}

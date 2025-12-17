@@ -23,7 +23,7 @@ Query Engine development roadmap and planned features.
 |---------|--------|----------|-------------|
 | Real-time Streaming | ✅ Done | High | Stream processing for live data |
 | Arrow Flight | ✅ Done | High | Network data transfer protocol |
-| PostgreSQL Protocol | 🚧 In Progress | Medium | Wire-compatible with psql clients |
+| PostgreSQL Protocol | ✅ Done | Medium | Wire-compatible with psql clients |
 | Web UI Dashboard | 🚧 In Progress | Medium | Browser-based query interface |
 
 ---

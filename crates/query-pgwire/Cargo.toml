@@ -1,0 +1,38 @@
+[package]
+name = "query-pgwire"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "PostgreSQL wire protocol support for Query Engine"
+
+[dependencies]
+# Core query engine crates
+query-core = { path = "../query-core" }
+query-parser = { path = "../query-parser" }
+query-planner = { path = "../query-planner" }
+query-executor = { path = "../query-executor" }
+query-storage = { path = "../query-storage" }
+
+# PostgreSQL wire protocol
+pgwire = "0.28"
+
+# Async runtime
+tokio.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+
+# Arrow for data conversion
+arrow.workspace = true
+
+# Error handling
+thiserror.workspace = true
+anyhow.workspace = true
+chrono = "0.4"
+
+# Logging
+tracing.workspace = true
+
+[dev-dependencies]
+tokio-test = "0.4"

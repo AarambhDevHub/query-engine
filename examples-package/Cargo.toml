@@ -43,6 +43,9 @@ name = "caching_query"
 [[example]]
 name = "flight_query"
 
+[[example]]
+name = "pgwire_server"
+
 [dependencies]
 query-core = { path = "../crates/query-core" }
 query-parser = { path = "../crates/query-parser" }
@@ -54,7 +57,9 @@ query-distributed = { path = "../crates/query-distributed" }
 query-streaming = { path = "../crates/query-streaming" }
 query-cache = { path = "../crates/query-cache" }
 query-flight = { path = "../crates/query-flight" }
+query-pgwire = { path = "../crates/query-pgwire" }
 tokio = { workspace = true }
 arrow = { workspace = true }
 anyhow = { workspace = true }
 tracing-subscriber = { workspace = true }
+

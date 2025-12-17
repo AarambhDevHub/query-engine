@@ -16,6 +16,10 @@ Welcome to the Query Engine documentation! This folder contains comprehensive gu
 - **[Index Guide](INDEX_GUIDE.md)** - B-Tree and Hash index usage
 - **[Window Functions](WINDOW_FUNCTIONS.md)** - Window function guide
 - **[Distributed Execution](DISTRIBUTED_EXECUTION.md)** - Multi-node query execution
+- **[Cache Guide](CACHE_GUIDE.md)** - Query caching with LRU and TTL
+- **[Streaming Guide](STREAMING_GUIDE.md)** - Real-time stream processing
+- **[Flight Guide](FLIGHT_GUIDE.md)** - Arrow Flight server/client
+- **[PgWire Guide](PGWIRE_GUIDE.md)** - PostgreSQL wire protocol
 
 ### Architecture & Development
 - **[Architecture](ARCHITECTURE.md)** - System design and component overview

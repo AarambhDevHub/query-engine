@@ -17,6 +17,7 @@ A high-performance, production-ready SQL query engine built in Rust with Apache 
 - **📊 Aggregate Functions**: COUNT, SUM, AVG, MIN, MAX with GROUP BY support
 - **🗂️ Index Support**: B-Tree and Hash indexes for fast data retrieval with CREATE/DROP INDEX syntax
 - **🌐 Distributed Execution**: Coordinator/Worker architecture with partitioning and fault tolerance
+- **🐘 PostgreSQL Protocol**: Connect with psql, pgAdmin, DBeaver, and other PostgreSQL clients
 - **📁 Multiple Data Sources**: CSV, Parquet, and in-memory tables
 - **🎯 Query Optimization**: Predicate pushdown and logical plan optimization
 - **🚀 Query Caching**: LRU cache with TTL for repeated queries
@@ -159,6 +160,7 @@ query-engine/
 │   ├── query-storage/      # Data source implementations
 │   ├── query-index/        # B-Tree and Hash index support
 │   ├── query-distributed/  # Distributed execution framework
+│   ├── query-pgwire/       # PostgreSQL wire protocol
 │   └── query-cli/          # Command-line interface
 ├── examples-package/       # Usage examples
 └── Cargo.toml             # Workspace configuration
@@ -214,8 +216,26 @@ qe export \
   -o results.parquet \
   -f parquet
 
+# Start PostgreSQL server
+qe pg-server --port 5432 --load users=data/users.csv
+
 # Show help
 qe --help
+```
+
+### PostgreSQL Server
+
+Connect with standard PostgreSQL clients:
+
+```bash
+# Start the server
+qe pg-server --port 5432 --load users=data/users.csv --load orders=data/orders.csv
+
+# Connect with psql
+psql -h localhost -p 5432
+
+# Connect with other clients (pgAdmin, DBeaver, etc.)
+# Host: localhost, Port: 5432
 ```
 
 ## 📚 SQL Features

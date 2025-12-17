@@ -448,27 +448,33 @@ fn evaluate_binary_op(left: &ArrayRef, op: BinaryOp, right: &ArrayRef) -> Result
         }
         BinaryOp::Modulo => modulo_op(left, right),
         BinaryOp::Equal => {
-            let result = eq(left, right)?;
+            let (l, r) = coerce_numeric_types(left, right)?;
+            let result = eq(&l, &r)?;
             Ok(Arc::new(result) as ArrayRef)
         }
         BinaryOp::NotEqual => {
-            let result = neq(left, right)?;
+            let (l, r) = coerce_numeric_types(left, right)?;
+            let result = neq(&l, &r)?;
             Ok(Arc::new(result) as ArrayRef)
         }
         BinaryOp::Less => {
-            let result = lt(left, right)?;
+            let (l, r) = coerce_numeric_types(left, right)?;
+            let result = lt(&l, &r)?;
             Ok(Arc::new(result) as ArrayRef)
         }
         BinaryOp::LessEqual => {
-            let result = lt_eq(left, right)?;
+            let (l, r) = coerce_numeric_types(left, right)?;
+            let result = lt_eq(&l, &r)?;
             Ok(Arc::new(result) as ArrayRef)
         }
         BinaryOp::Greater => {
-            let result = gt(left, right)?;
+            let (l, r) = coerce_numeric_types(left, right)?;
+            let result = gt(&l, &r)?;
             Ok(Arc::new(result) as ArrayRef)
         }
         BinaryOp::GreaterEqual => {
-            let result = gt_eq(left, right)?;
+            let (l, r) = coerce_numeric_types(left, right)?;
+            let result = gt_eq(&l, &r)?;
             Ok(Arc::new(result) as ArrayRef)
         }
         BinaryOp::And => {
@@ -503,6 +509,103 @@ fn evaluate_binary_op(left: &ArrayRef, op: BinaryOp, right: &ArrayRef) -> Result
             let result = compute::or(l, r)?;
             Ok(Arc::new(result) as ArrayRef)
         }
+    }
+}
+
+/// Coerce numeric types to a common type for comparison
+/// Float64 is the widest type, so we coerce integers to Float64 when comparing with floats
+fn coerce_numeric_types(left: &ArrayRef, right: &ArrayRef) -> Result<(ArrayRef, ArrayRef)> {
+    use arrow::datatypes::DataType;
+
+    let left_type = left.data_type();
+    let right_type = right.data_type();
+
+    // If types already match, return as-is
+    if left_type == right_type {
+        return Ok((left.clone(), right.clone()));
+    }
+
+    // Handle Float64 with integer types
+    if *left_type == DataType::Float64 {
+        if let Some(int_arr) = right.as_any().downcast_ref::<Int64Array>() {
+            let float_arr: Float64Array = int_arr.iter().map(|v| v.map(|x| x as f64)).collect();
+            return Ok((left.clone(), Arc::new(float_arr) as ArrayRef));
+        }
+        if let Some(int_arr) = right.as_any().downcast_ref::<Int32Array>() {
+            let float_arr: Float64Array = int_arr.iter().map(|v| v.map(|x| x as f64)).collect();
+            return Ok((left.clone(), Arc::new(float_arr) as ArrayRef));
+        }
+    }
+
+    if *right_type == DataType::Float64 {
+        if let Some(int_arr) = left.as_any().downcast_ref::<Int64Array>() {
+            let float_arr: Float64Array = int_arr.iter().map(|v| v.map(|x| x as f64)).collect();
+            return Ok((Arc::new(float_arr) as ArrayRef, right.clone()));
+        }
+        if let Some(int_arr) = left.as_any().downcast_ref::<Int32Array>() {
+            let float_arr: Float64Array = int_arr.iter().map(|v| v.map(|x| x as f64)).collect();
+            return Ok((Arc::new(float_arr) as ArrayRef, right.clone()));
+        }
+    }
+
+    // Handle Float32 with integer types
+    if *left_type == DataType::Float32 || *right_type == DataType::Float32 {
+        // Promote both to Float64 for consistency
+        let left_f64 = cast_to_float64(left)?;
+        let right_f64 = cast_to_float64(right)?;
+        return Ok((left_f64, right_f64));
+    }
+
+    // Handle Int64 with Int32
+    if *left_type == DataType::Int64 {
+        if let Some(int_arr) = right.as_any().downcast_ref::<Int32Array>() {
+            let int64_arr: Int64Array = int_arr.iter().map(|v| v.map(|x| x as i64)).collect();
+            return Ok((left.clone(), Arc::new(int64_arr) as ArrayRef));
+        }
+    }
+
+    if *right_type == DataType::Int64 {
+        if let Some(int_arr) = left.as_any().downcast_ref::<Int32Array>() {
+            let int64_arr: Int64Array = int_arr.iter().map(|v| v.map(|x| x as i64)).collect();
+            return Ok((Arc::new(int64_arr) as ArrayRef, right.clone()));
+        }
+    }
+
+    // Fallback to original arrays - let Arrow handle the error if types don't match
+    Ok((left.clone(), right.clone()))
+}
+
+/// Cast array to Float64
+fn cast_to_float64(arr: &ArrayRef) -> Result<ArrayRef> {
+    use arrow::datatypes::DataType;
+
+    match arr.data_type() {
+        DataType::Float64 => Ok(arr.clone()),
+        DataType::Float32 => {
+            if let Some(f32_arr) = arr.as_any().downcast_ref::<Float32Array>() {
+                let f64_arr: Float64Array = f32_arr.iter().map(|v| v.map(|x| x as f64)).collect();
+                Ok(Arc::new(f64_arr) as ArrayRef)
+            } else {
+                Ok(arr.clone())
+            }
+        }
+        DataType::Int64 => {
+            if let Some(int_arr) = arr.as_any().downcast_ref::<Int64Array>() {
+                let f64_arr: Float64Array = int_arr.iter().map(|v| v.map(|x| x as f64)).collect();
+                Ok(Arc::new(f64_arr) as ArrayRef)
+            } else {
+                Ok(arr.clone())
+            }
+        }
+        DataType::Int32 => {
+            if let Some(int_arr) = arr.as_any().downcast_ref::<Int32Array>() {
+                let f64_arr: Float64Array = int_arr.iter().map(|v| v.map(|x| x as f64)).collect();
+                Ok(Arc::new(f64_arr) as ArrayRef)
+            } else {
+                Ok(arr.clone())
+            }
+        }
+        _ => Ok(arr.clone()),
     }
 }
 

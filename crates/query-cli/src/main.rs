@@ -143,6 +143,21 @@ enum Commands {
         #[arg(short, long, default_value = "table")]
         output: String,
     },
+
+    /// Start PostgreSQL-compatible server
+    PgServer {
+        /// Port to listen on
+        #[arg(short, long, default_value = "5432")]
+        port: u16,
+
+        /// Host to bind to
+        #[arg(short = 'H', long, default_value = "0.0.0.0")]
+        host: String,
+
+        /// CSV files to load (format: name=path)
+        #[arg(short, long)]
+        load: Vec<String>,
+    },
 }
 
 #[tokio::main]
@@ -213,6 +228,9 @@ async fn main() -> Result<()> {
             output,
         }) => {
             flight_query(&connect, &sql, &output).await?;
+        }
+        Some(Commands::PgServer { port, host, load }) => {
+            start_pg_server(&host, port, &load).await?;
         }
         None => {
             // Default: Start REPL

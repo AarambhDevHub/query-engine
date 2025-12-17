@@ -16,6 +16,7 @@ query-engine workspace
 ├── query-streaming   # Real-time stream processing
 ├── query-distributed # Distributed execution
 ├── query-flight      # Arrow Flight server/client
+├── query-pgwire      # PostgreSQL wire protocol
 └── query-cli         # CLI interface
 ```
 
@@ -500,6 +501,43 @@ let mut stream = FlightStreamSource::new("http://localhost:50051", "users");
 while let Some(batch) = stream.next_batch().await {
     process(batch?);
 }
+```
+
+---
+
+## query-pgwire
+
+**Purpose:** PostgreSQL wire protocol for client connectivity.
+
+### Key Types
+
+```rust
+use query_pgwire::{PgServer, QueryBackend, QueryServerHandlers};
+```
+
+#### PgServer
+
+```rust
+// Create and start server
+let server = PgServer::new("0.0.0.0", 5432);
+
+// Load CSV data
+server.load_csv("data/users.csv", "users").await?;
+server.load_csv("data/orders.csv", "orders").await?;
+
+// Start listening
+server.start().await?;
+```
+
+#### Connect with Clients
+
+```bash
+# psql
+psql -h localhost -p 5432
+
+# Python
+import psycopg2
+conn = psycopg2.connect(host="localhost", port=5432)
 ```
 
 ---

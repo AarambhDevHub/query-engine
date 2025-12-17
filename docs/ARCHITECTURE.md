@@ -58,6 +58,7 @@ query-engine/
 │   ├── query-streaming/    # Real-time stream processing
 │   ├── query-distributed/  # Distributed execution
 │   ├── query-flight/       # Arrow Flight server/client
+│   ├── query-pgwire/       # PostgreSQL wire protocol
 │   └── query-cli/          # CLI interface
 └── examples-package/       # Usage examples
 ```
@@ -424,5 +425,6 @@ Limit (10)
 
 - **Streaming**: Real-time query processing ✅ (implemented)
 - **Arrow Flight**: Network data transfer ✅ (fully implemented)
-- **PostgreSQL Protocol**: Wire compatibility
+- **PostgreSQL Protocol**: Wire compatibility ✅ (implemented via `query-pgwire`)
 - **Cost-Based Optimizer**: Statistics-driven query planning
+

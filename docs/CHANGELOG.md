@@ -22,6 +22,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **FlightStreamSource**: Stream data from Flight servers
 - **CLI Commands**: `flight-server` and `flight-query`
 
+#### PostgreSQL Wire Protocol
+- **PgServer** for PostgreSQL-compatible server hosting
+- **SimpleQueryHandler** implementation for SQL processing
+- **Arrow to PostgreSQL type conversion** for result encoding
+- **CSV loading** at server startup via `--load` flag
+- **CLI Command**: `pg-server` with host, port, and load options
+- **Compatible Clients**: psql, pgAdmin, DBeaver, and other PostgreSQL clients
+
 #### Real-time Streaming Queries
 - **StreamSource** trait for async data streams
 - **ChannelStreamSource** for Tokio channel-based streaming
@@ -98,5 +106,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| 0.2.0 | 2025-12-15 | Arrow Flight, Real-time streaming |
+| 0.2.0 | 2025-12-17 | Arrow Flight, PostgreSQL Protocol, Real-time streaming |
 | 0.1.0 | 2025-12-14 | Initial release with caching, distributed execution, indexes |
+

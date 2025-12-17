@@ -19,6 +19,7 @@ query-storage = { path = "../query-storage" }
 query-index = { path = "../query-index" }
 query-cache = { path = "../query-cache" }
 query-flight = { path = "../query-flight" }
+query-pgwire = { path = "../query-pgwire" }
 clap = { version = "4.5", features = ["derive", "cargo"] }
 rustyline = "14.0"
 rustyline-derive = "0.10"

@@ -119,6 +119,31 @@ qe flight-query -c http://localhost:50051 -s "users" -o csv
 - `-s, --sql <QUERY>` - SQL query to execute
 - `-o, --output <FORMAT>` - Output format: table, json, csv
 
+### PostgreSQL Server
+
+Start PostgreSQL-compatible server:
+
+```bash
+# Start on default port 5432
+qe pg-server
+
+# Load CSV files as tables
+qe pg-server --load users=data/users.csv --load orders=data/orders.csv
+
+# Custom host/port
+qe pg-server --host 127.0.0.1 --port 5433
+```
+
+**Options:**
+- `-p, --port <PORT>` - Port to listen on (default: 5432)
+- `-H, --host <HOST>` - Host to bind (default: 0.0.0.0)
+- `-l, --load <NAME=PATH>` - Load CSV files as tables
+
+**Connect with psql:**
+```bash
+psql -h localhost -p 5432
+```
+
 ---
 
 ## REPL Commands

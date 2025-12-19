@@ -1,10 +1,14 @@
 //! Query processing backend for PostgreSQL protocol
 
+use crate::auth::{AuthConfig, create_md5_auth_handler};
+use crate::extended::QueryExtendedHandler;
 use crate::result::{record_batch_to_rows, schema_to_field_info};
 use async_trait::async_trait;
+use pgwire::api::auth::DefaultServerParameterProvider;
+use pgwire::api::auth::md5pass::Md5PasswordAuthStartupHandler;
 use pgwire::api::auth::noop::NoopStartupHandler;
 use pgwire::api::copy::NoopCopyHandler;
-use pgwire::api::query::{PlaceholderExtendedQueryHandler, SimpleQueryHandler};
+use pgwire::api::query::SimpleQueryHandler;
 use pgwire::api::results::{QueryResponse, Response};
 use pgwire::api::{ClientInfo, NoopErrorHandler, PgWireServerHandlers};
 use pgwire::error::{ErrorInfo, PgWireError, PgWireResult};
@@ -471,26 +475,31 @@ impl QueryBackend {
     }
 }
 
-/// Simple startup handler that accepts all connections
+/// Simple startup handler that accepts all connections (no authentication)
 pub struct SimpleStartupHandler;
 
 impl NoopStartupHandler for SimpleStartupHandler {}
 
-/// Server handlers for PostgreSQL protocol
+// ============================================================================
+// Server Handlers - No Authentication
+// ============================================================================
+
+/// Server handlers for PostgreSQL protocol (without authentication)
 pub struct QueryServerHandlers {
     startup_handler: Arc<SimpleStartupHandler>,
     simple_query_handler: Arc<QueryBackend>,
-    extended_query_handler: Arc<PlaceholderExtendedQueryHandler>,
+    extended_query_handler: Arc<QueryExtendedHandler>,
     copy_handler: Arc<NoopCopyHandler>,
     error_handler: Arc<NoopErrorHandler>,
 }
 
 impl QueryServerHandlers {
     pub fn new(backend: Arc<QueryBackend>) -> Self {
+        let tables = backend.tables();
         Self {
             startup_handler: Arc::new(SimpleStartupHandler),
             simple_query_handler: backend,
-            extended_query_handler: Arc::new(PlaceholderExtendedQueryHandler),
+            extended_query_handler: Arc::new(QueryExtendedHandler::new(tables)),
             copy_handler: Arc::new(NoopCopyHandler),
             error_handler: Arc::new(NoopErrorHandler),
         }
@@ -500,7 +509,65 @@ impl QueryServerHandlers {
 impl PgWireServerHandlers for QueryServerHandlers {
     type StartupHandler = SimpleStartupHandler;
     type SimpleQueryHandler = QueryBackend;
-    type ExtendedQueryHandler = PlaceholderExtendedQueryHandler;
+    type ExtendedQueryHandler = QueryExtendedHandler;
+    type CopyHandler = NoopCopyHandler;
+    type ErrorHandler = NoopErrorHandler;
+
+    fn simple_query_handler(&self) -> Arc<Self::SimpleQueryHandler> {
+        Arc::clone(&self.simple_query_handler)
+    }
+
+    fn extended_query_handler(&self) -> Arc<Self::ExtendedQueryHandler> {
+        Arc::clone(&self.extended_query_handler)
+    }
+
+    fn startup_handler(&self) -> Arc<Self::StartupHandler> {
+        Arc::clone(&self.startup_handler)
+    }
+
+    fn copy_handler(&self) -> Arc<Self::CopyHandler> {
+        Arc::clone(&self.copy_handler)
+    }
+
+    fn error_handler(&self) -> Arc<Self::ErrorHandler> {
+        Arc::clone(&self.error_handler)
+    }
+}
+
+// ============================================================================
+// Server Handlers - With MD5 Authentication
+// ============================================================================
+
+use crate::auth::QueryAuthSource;
+
+/// Server handlers for PostgreSQL protocol with MD5 password authentication
+pub struct AuthQueryServerHandlers {
+    startup_handler:
+        Arc<Md5PasswordAuthStartupHandler<QueryAuthSource, DefaultServerParameterProvider>>,
+    simple_query_handler: Arc<QueryBackend>,
+    extended_query_handler: Arc<QueryExtendedHandler>,
+    copy_handler: Arc<NoopCopyHandler>,
+    error_handler: Arc<NoopErrorHandler>,
+}
+
+impl AuthQueryServerHandlers {
+    pub fn new(backend: Arc<QueryBackend>, auth_config: AuthConfig) -> Self {
+        let tables = backend.tables();
+        Self {
+            startup_handler: Arc::new(create_md5_auth_handler(auth_config)),
+            simple_query_handler: backend,
+            extended_query_handler: Arc::new(QueryExtendedHandler::new(tables)),
+            copy_handler: Arc::new(NoopCopyHandler),
+            error_handler: Arc::new(NoopErrorHandler),
+        }
+    }
+}
+
+impl PgWireServerHandlers for AuthQueryServerHandlers {
+    type StartupHandler =
+        Md5PasswordAuthStartupHandler<QueryAuthSource, DefaultServerParameterProvider>;
+    type SimpleQueryHandler = QueryBackend;
+    type ExtendedQueryHandler = QueryExtendedHandler;
     type CopyHandler = NoopCopyHandler;
     type ErrorHandler = NoopErrorHandler;
 

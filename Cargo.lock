@@ -2325,6 +2325,7 @@ dependencies = [
  "query-parser",
  "query-planner",
  "query-storage",
+ "rand 0.8.5",
  "thiserror 1.0.69",
  "tokio",
  "tokio-test",

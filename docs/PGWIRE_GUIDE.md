@@ -111,6 +111,79 @@ The PostgreSQL server supports all SQL features of Query Engine:
 └─────────────────────────────────────────────────────────┘
 ```
 
+## Authentication
+
+Query Engine supports MD5 password authentication to secure your PostgreSQL connections.
+
+### Enabling Authentication
+
+```bash
+# Start with authentication enabled
+qe pg-server --user admin --password secret123
+
+# Connect with credentials
+psql -h localhost -p 5432 -U admin
+# (prompts for password)
+```
+
+### Programmatic Authentication
+
+```rust
+use query_pgwire::{PgServer, AuthConfig};
+
+// Single user
+let server = PgServer::new("0.0.0.0", 5432)
+    .with_auth("admin", "secret123");
+
+// Multiple users
+let auth = AuthConfig::new()
+    .add_user("admin", "admin_pass")
+    .add_user("readonly", "readonly_pass");
+
+let server = PgServer::new("0.0.0.0", 5432)
+    .with_auth_config(auth);
+```
+
+### Connection Settings (with Authentication)
+
+For GUI clients, use these settings:
+
+- **Host**: `localhost` (or your server IP)
+- **Port**: `5432` (or your custom port)
+- **Database**: Any name (ignored)
+- **User**: Your configured username
+- **Password**: Your configured password
+
+## Extended Query Protocol
+
+Query Engine now supports the PostgreSQL Extended Query Protocol, enabling:
+
+- **Prepared Statements**: Parse once, execute many times
+- **Parameter Binding**: Use `$1`, `$2` style placeholders
+- **Binary Protocol**: More efficient data transfer
+
+### Python Example with Parameters
+
+```python
+import psycopg2
+
+conn = psycopg2.connect(
+    host="localhost",
+    port=5432,
+    user="admin",
+    password="secret123"
+)
+cursor = conn.cursor()
+
+# Prepared statement with parameters
+cursor.execute(
+    "SELECT * FROM users WHERE age > %s AND name LIKE %s",
+    (25, 'A%')
+)
+for row in cursor.fetchall():
+    print(row)
+```
+
 ## Limitations
 
 Current limitations and planned future improvements:
@@ -119,18 +192,17 @@ Current limitations and planned future improvements:
 
 | Feature | Priority | Description |
 |---------|----------|-------------|
-| Extended Query Protocol | High | Prepared statements, parameter binding |
-| Authentication | High | MD5/SCRAM-SHA-256 password authentication |
 | TLS/SSL | Medium | Encrypted connections |
 | Transactions | Medium | BEGIN, COMMIT, ROLLBACK support |
 | CREATE/INSERT/UPDATE/DELETE | Medium | Write operations (currently read-only) |
 | System Catalogs | Low | `pg_catalog` tables for introspection |
 | COPY Command | Low | Bulk data import/export |
 | Cursors | Low | Server-side cursor support |
+| SCRAM-SHA-256 | Low | More secure authentication (currently MD5) |
 
 ### Current Workarounds
 
-- **No Authentication**: Use firewall rules to restrict access
+- **No TLS**: Use secure network (VPN, private network) for sensitive data
 - **No Transactions**: Each query auto-commits
 - **No COPY**: Use `--load` flag or `register_table()` API
 - **No System Catalogs**: Use `SHOW TABLES` and `DESCRIBE table`

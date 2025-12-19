@@ -157,6 +157,14 @@ enum Commands {
         /// CSV files to load (format: name=path)
         #[arg(short, long)]
         load: Vec<String>,
+
+        /// Username for authentication (enables MD5 password auth)
+        #[arg(short, long)]
+        user: Option<String>,
+
+        /// Password for authentication (requires --user)
+        #[arg(long)]
+        password: Option<String>,
     },
 }
 
@@ -229,8 +237,14 @@ async fn main() -> Result<()> {
         }) => {
             flight_query(&connect, &sql, &output).await?;
         }
-        Some(Commands::PgServer { port, host, load }) => {
-            start_pg_server(&host, port, &load).await?;
+        Some(Commands::PgServer {
+            port,
+            host,
+            load,
+            user,
+            password,
+        }) => {
+            start_pg_server(&host, port, &load, user, password).await?;
         }
         None => {
             // Default: Start REPL

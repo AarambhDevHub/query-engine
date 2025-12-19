@@ -124,7 +124,7 @@ qe flight-query -c http://localhost:50051 -s "users" -o csv
 Start PostgreSQL-compatible server:
 
 ```bash
-# Start on default port 5432
+# Start on default port 5432 (no authentication)
 qe pg-server
 
 # Load CSV files as tables
@@ -132,16 +132,26 @@ qe pg-server --load users=data/users.csv --load orders=data/orders.csv
 
 # Custom host/port
 qe pg-server --host 127.0.0.1 --port 5433
+
+# With MD5 password authentication
+qe pg-server --user admin --password secret123 --load users=data/users.csv
 ```
 
 **Options:**
 - `-p, --port <PORT>` - Port to listen on (default: 5432)
 - `-H, --host <HOST>` - Host to bind (default: 0.0.0.0)
 - `-l, --load <NAME=PATH>` - Load CSV files as tables
+- `-u, --user <USERNAME>` - Username for MD5 authentication (enables auth)
+- `--password <PASSWORD>` - Password for authentication (requires --user)
 
 **Connect with psql:**
 ```bash
+# Without authentication
 psql -h localhost -p 5432
+
+# With authentication
+psql -h localhost -p 5432 -U admin
+# Enter password when prompted
 ```
 
 ---

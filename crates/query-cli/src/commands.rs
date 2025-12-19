@@ -659,7 +659,13 @@ pub async fn flight_query(connect: &str, sql: &str, output_format: &str) -> Resu
 }
 
 /// Start a PostgreSQL-compatible server
-pub async fn start_pg_server(host: &str, port: u16, load_files: &[String]) -> Result<()> {
+pub async fn start_pg_server(
+    host: &str,
+    port: u16,
+    load_files: &[String],
+    user: Option<String>,
+    password: Option<String>,
+) -> Result<()> {
     use query_pgwire::PgServer;
     use std::path::Path;
 
@@ -670,7 +676,32 @@ pub async fn start_pg_server(host: &str, port: u16, load_files: &[String]) -> Re
         port.to_string().bright_cyan()
     );
 
-    let server = PgServer::new(host, port);
+    // Create server with or without authentication
+    let server = match (&user, &password) {
+        (Some(u), Some(p)) => {
+            println!(
+                "  {} Authentication enabled for user '{}'",
+                "🔒".bright_yellow(),
+                u.bright_cyan()
+            );
+            PgServer::new(host, port).with_auth(u, p)
+        }
+        (Some(u), None) => {
+            println!(
+                "  {} Warning: No password provided for user '{}', authentication disabled",
+                "⚠".bright_yellow(),
+                u
+            );
+            PgServer::new(host, port)
+        }
+        _ => {
+            println!(
+                "  {} Authentication disabled (no --user specified)",
+                "⚠".bright_yellow()
+            );
+            PgServer::new(host, port)
+        }
+    };
 
     // Load any specified CSV files
     for spec in load_files {
@@ -699,10 +730,24 @@ pub async fn start_pg_server(host: &str, port: u16, load_files: &[String]) -> Re
     println!("{} Server ready, press Ctrl+C to stop", "✓".bright_green());
     println!();
     println!("Connect with:");
-    println!(
-        "  {}",
-        format!("psql -h {} -p {} -U postgres -d query_engine", host, port).bright_cyan()
-    );
+    if user.is_some() {
+        println!(
+            "  {}",
+            format!(
+                "psql -h {} -p {} -U {} -d query_engine",
+                host,
+                port,
+                user.as_deref().unwrap_or("postgres")
+            )
+            .bright_cyan()
+        );
+        println!("  (You will be prompted for password)");
+    } else {
+        println!(
+            "  {}",
+            format!("psql -h {} -p {} -U postgres -d query_engine", host, port).bright_cyan()
+        );
+    }
 
     server.start().await?;
 

@@ -321,6 +321,85 @@ while let Some(batch) = stream.next_batch().await {
 }
 ```
 
+## PostgreSQL Server
+
+Start a PostgreSQL-compatible server that supports standard clients:
+
+### Basic Server
+
+```rust
+use query_pgwire::PgServer;
+
+let server = PgServer::new("0.0.0.0", 5432);
+server.start().await?;
+```
+
+### With TLS
+
+```rust
+use query_pgwire::{PgServer, TlsConfig};
+
+let server = PgServer::new("0.0.0.0", 5432)
+    .with_tls(TlsConfig::new(
+        "server.crt",  // certificate path
+        "server.key",  // private key path
+    )?);
+
+server.start().await?;
+```
+
+### With Authentication
+
+```rust
+use query_pgwire::{PgServer, AuthConfig};
+
+let server = PgServer::new("0.0.0.0", 5432)
+    .with_auth("admin", "password123");
+
+// Or multiple users
+let auth = AuthConfig::new()
+    .add_user("admin", "admin_pass")
+    .add_user("readonly", "reader_pass");
+
+let server = PgServer::new("0.0.0.0", 5432)
+    .with_auth_config(auth);
+```
+
+### Register Tables
+
+```rust
+use query_pgwire::PgServer;
+use query_storage::MemoryDataSource;
+
+let backend = QueryBackend::new();
+
+// Register a table
+backend.register_table("users", schema, data_source).await;
+
+// Or load from CSV at startup
+let server = PgServer::with_backend(backend)
+    .start().await?;
+```
+
+### Write Operations
+
+The PostgreSQL server supports DML statements:
+
+```sql
+-- Create tables
+CREATE TABLE users (id INT, name VARCHAR(100), active BOOLEAN);
+
+-- Insert data
+INSERT INTO users VALUES (1, 'Alice', TRUE);
+INSERT INTO users VALUES (2, 'Bob', FALSE);
+
+-- Update (applies to all rows)
+UPDATE users SET name = 'Updated';
+
+-- Delete (all rows)
+DELETE FROM users;
+```
+
 ## Distributed Execution
 
 ```rust

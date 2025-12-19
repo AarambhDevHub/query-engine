@@ -23,6 +23,7 @@ cargo run --example <example_name>
 | `distributed_query` | Distributed execution |
 | `streaming_query` | Real-time stream processing |
 | `caching_query` | Query result caching |
+| `pgwire_server` | PostgreSQL server with TLS |
 
 ---
 
@@ -410,6 +411,44 @@ cache.clear();
 ```
 
 Run: `cargo run --example caching_query`
+
+---
+
+## PostgreSQL Server
+
+### pgwire_server
+
+```rust
+use query_pgwire::{PgServer, TlsConfig};
+
+// Start basic server
+let server = PgServer::new("0.0.0.0", 5432);
+server.start().await?;
+
+// With TLS encryption
+let server = PgServer::new("0.0.0.0", 5432)
+    .with_tls(TlsConfig::new("server.crt", "server.key")?);
+
+// With auth
+let server = PgServer::new("0.0.0.0", 5432)
+    .with_auth("admin", "password");
+```
+
+Connect and query:
+```bash
+# Without TLS
+psql -h localhost -p 5432
+
+# With TLS
+PGSSLMODE=require psql -h localhost -p 5432
+
+# Execute SQL
+CREATE TABLE users (id INT, name VARCHAR(100));
+INSERT INTO users VALUES (1, 'Alice');
+SELECT * FROM users;
+```
+
+Run: `cargo run --example pgwire_server`
 
 ---
 

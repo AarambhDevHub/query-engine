@@ -4,6 +4,31 @@ All notable changes to Query Engine are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.3.0] - 2025-12-19
+
+### Added
+
+#### TLS/SSL Support
+- **TLS encryption** for PostgreSQL wire protocol via `--tls-cert` and `--tls-key` flags
+- tokio-rustls integration for secure connections
+- Compatible with `sslmode=require` in psql and other clients
+
+#### Authentication
+- **MD5 password authentication** via `--user` and `--password` flags
+- No-authentication mode for development (default)
+
+#### Write Operations
+- **CREATE TABLE** statement with data type support (INT, VARCHAR, BOOLEAN, etc.)
+- **INSERT INTO** with multi-row VALUES support
+- **UPDATE** with SET clause (all rows affected)
+- **DELETE FROM** statement
+- **TRUE/FALSE** boolean literals in parser
+
+#### Transaction Commands
+- **BEGIN/COMMIT/ROLLBACK** command recognition (auto-commit mode)
+
+---
+
 ## [0.2.0] - 2025-12-15
 
 ### Added
@@ -106,6 +131,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 0.3.0 | 2025-12-19 | TLS/SSL, Authentication, Write Operations (CREATE/INSERT/UPDATE/DELETE) |
 | 0.2.0 | 2025-12-17 | Arrow Flight, PostgreSQL Protocol, Real-time streaming |
 | 0.1.0 | 2025-12-14 | Initial release with caching, distributed execution, indexes |
 

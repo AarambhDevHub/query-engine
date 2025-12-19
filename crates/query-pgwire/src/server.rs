@@ -2,6 +2,7 @@
 
 use crate::auth::AuthConfig;
 use crate::backend::{AuthQueryServerHandlers, QueryBackend, QueryServerHandlers, TableEntry};
+use crate::tls::TlsConfig;
 use arrow::csv::ReaderBuilder;
 use pgwire::tokio::process_socket;
 use query_core::Schema;
@@ -12,6 +13,7 @@ use std::path::Path;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::RwLock;
+use tokio_rustls::TlsAcceptor;
 use tracing::{error, info, warn};
 
 /// PostgreSQL-compatible server for Query Engine
@@ -34,16 +36,18 @@ pub struct PgServer {
     port: u16,
     tables: Arc<RwLock<HashMap<String, TableEntry>>>,
     auth_config: Option<AuthConfig>,
+    tls_config: Option<TlsConfig>,
 }
 
 impl PgServer {
-    /// Create a new PgServer instance (no authentication)
+    /// Create a new PgServer instance (no authentication, no TLS)
     pub fn new(host: &str, port: u16) -> Self {
         Self {
             host: host.to_string(),
             port,
             tables: Arc::new(RwLock::new(HashMap::new())),
             auth_config: None,
+            tls_config: None,
         }
     }
 
@@ -79,6 +83,22 @@ impl PgServer {
     /// ```
     pub fn with_auth_config(mut self, config: AuthConfig) -> Self {
         self.auth_config = Some(config);
+        self
+    }
+
+    /// Enable TLS/SSL encryption
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use query_pgwire::{PgServer, TlsConfig};
+    ///
+    /// let tls = TlsConfig::new("server.crt", "server.key");
+    /// let server = PgServer::new("0.0.0.0", 5432)
+    ///     .with_tls(tls);
+    /// ```
+    pub fn with_tls(mut self, config: TlsConfig) -> Self {
+        self.tls_config = Some(config);
         self
     }
 
@@ -159,6 +179,23 @@ impl PgServer {
         info!("PostgreSQL server listening on {}", addr);
         info!("Connect with: psql -h {} -p {}", self.host, self.port);
 
+        // Create TLS acceptor if configured
+        let tls_acceptor = if let Some(ref tls_config) = self.tls_config {
+            match tls_config.create_acceptor() {
+                Ok(acceptor) => {
+                    info!("TLS/SSL encryption is ENABLED");
+                    Some(acceptor)
+                }
+                Err(e) => {
+                    error!("Failed to create TLS acceptor: {}", e);
+                    return Err(anyhow::anyhow!("TLS configuration error: {}", e));
+                }
+            }
+        } else {
+            warn!("TLS/SSL encryption is DISABLED");
+            None
+        };
+
         // Check if authentication is enabled
         let auth_enabled = self
             .auth_config
@@ -171,20 +208,24 @@ impl PgServer {
             warn!("Authentication is DISABLED - server accepts all connections");
         }
 
-        // Take ownership of auth_config before consuming self
+        // Take ownership before consuming self
         let auth_config = self.auth_config;
         let tables = self.tables;
 
-        // Choose connection handling based on auth config
-        match auth_config {
-            Some(config) if config.is_enabled() => {
+        // Choose connection handling based on auth config and TLS
+        match (auth_config, tls_acceptor) {
+            (Some(config), Some(tls)) if config.is_enabled() => {
+                Self::run_with_auth_tls_static(tables, listener, config, tls).await
+            }
+            (Some(config), None) if config.is_enabled() => {
                 Self::run_with_auth_static(tables, listener, config).await
             }
+            (_, Some(tls)) => Self::run_with_tls_static(tables, listener, tls).await,
             _ => Self::run_without_auth_static(tables, listener).await,
         }
     }
 
-    /// Run the server without authentication (static version)
+    /// Run the server without authentication or TLS
     async fn run_without_auth_static(
         tables: Arc<RwLock<HashMap<String, TableEntry>>>,
         listener: TcpListener,
@@ -196,7 +237,6 @@ impl PgServer {
                     let tables = Arc::clone(&tables);
 
                     tokio::spawn(async move {
-                        // Create a fresh handler for each connection
                         let backend = Arc::new(QueryBackend::with_tables(tables));
                         let handlers = Arc::new(QueryServerHandlers::new(backend));
 
@@ -213,7 +253,38 @@ impl PgServer {
         }
     }
 
-    /// Run the server with MD5 password authentication (static version)
+    /// Run the server with TLS but no authentication
+    async fn run_with_tls_static(
+        tables: Arc<RwLock<HashMap<String, TableEntry>>>,
+        listener: TcpListener,
+        tls_acceptor: TlsAcceptor,
+    ) -> anyhow::Result<()> {
+        loop {
+            match listener.accept().await {
+                Ok((socket, peer_addr)) => {
+                    info!("New TLS connection from {}", peer_addr);
+                    let tables = Arc::clone(&tables);
+                    let tls = tls_acceptor.clone();
+
+                    tokio::spawn(async move {
+                        let backend = Arc::new(QueryBackend::with_tables(tables));
+                        let handlers = Arc::new(QueryServerHandlers::new(backend));
+
+                        if let Err(e) = process_socket(socket, Some(Arc::new(tls)), handlers).await
+                        {
+                            error!("Connection error: {}", e);
+                        }
+                        info!("Connection from {} closed", peer_addr);
+                    });
+                }
+                Err(e) => {
+                    error!("Accept error: {}", e);
+                }
+            }
+        }
+    }
+
+    /// Run the server with MD5 authentication but no TLS
     async fn run_with_auth_static(
         tables: Arc<RwLock<HashMap<String, TableEntry>>>,
         listener: TcpListener,
@@ -232,11 +303,48 @@ impl PgServer {
                     let auth = (*auth_config).clone();
 
                     tokio::spawn(async move {
-                        // Create a fresh handler for each connection with auth
                         let backend = Arc::new(QueryBackend::with_tables(tables));
                         let handlers = Arc::new(AuthQueryServerHandlers::new(backend, auth));
 
                         if let Err(e) = process_socket(socket, None, handlers).await {
+                            error!("Connection error: {}", e);
+                        }
+                        info!("Connection from {} closed", peer_addr);
+                    });
+                }
+                Err(e) => {
+                    error!("Accept error: {}", e);
+                }
+            }
+        }
+    }
+
+    /// Run the server with both MD5 authentication and TLS
+    async fn run_with_auth_tls_static(
+        tables: Arc<RwLock<HashMap<String, TableEntry>>>,
+        listener: TcpListener,
+        auth_config: AuthConfig,
+        tls_acceptor: TlsAcceptor,
+    ) -> anyhow::Result<()> {
+        let auth_config = Arc::new(auth_config);
+
+        loop {
+            match listener.accept().await {
+                Ok((socket, peer_addr)) => {
+                    info!(
+                        "New secure connection from {} (TLS + authentication)",
+                        peer_addr
+                    );
+                    let tables = Arc::clone(&tables);
+                    let auth = (*auth_config).clone();
+                    let tls = tls_acceptor.clone();
+
+                    tokio::spawn(async move {
+                        let backend = Arc::new(QueryBackend::with_tables(tables));
+                        let handlers = Arc::new(AuthQueryServerHandlers::new(backend, auth));
+
+                        if let Err(e) = process_socket(socket, Some(Arc::new(tls)), handlers).await
+                        {
                             error!("Connection error: {}", e);
                         }
                         info!("Connection from {} closed", peer_addr);

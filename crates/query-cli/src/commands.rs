@@ -665,8 +665,10 @@ pub async fn start_pg_server(
     load_files: &[String],
     user: Option<String>,
     password: Option<String>,
+    tls_cert: Option<String>,
+    tls_key: Option<String>,
 ) -> Result<()> {
-    use query_pgwire::PgServer;
+    use query_pgwire::{PgServer, TlsConfig};
     use std::path::Path;
 
     println!(
@@ -676,15 +678,48 @@ pub async fn start_pg_server(
         port.to_string().bright_cyan()
     );
 
-    // Create server with or without authentication
-    let server = match (&user, &password) {
+    // Create base server
+    let mut server = PgServer::new(host, port);
+
+    // Configure TLS if provided
+    if let (Some(cert), Some(key)) = (&tls_cert, &tls_key) {
+        let cert_path = Path::new(cert);
+        let key_path = Path::new(key);
+
+        if !cert_path.exists() {
+            anyhow::bail!("TLS certificate file not found: {}", cert);
+        }
+        if !key_path.exists() {
+            anyhow::bail!("TLS key file not found: {}", key);
+        }
+
+        println!(
+            "  {} TLS enabled with cert: {}",
+            "🔒".bright_yellow(),
+            cert.bright_cyan()
+        );
+        server = server.with_tls(TlsConfig::new(cert, key));
+    } else if tls_cert.is_some() || tls_key.is_some() {
+        println!(
+            "  {} Warning: Both --tls-cert and --tls-key required for TLS, TLS disabled",
+            "⚠".bright_yellow()
+        );
+    } else {
+        println!(
+            "  {} TLS disabled (no --tls-cert specified)",
+            "⚠".bright_yellow()
+        );
+    }
+
+    // Configure authentication
+    server = match (&user, &password) {
         (Some(u), Some(p)) => {
             println!(
                 "  {} Authentication enabled for user '{}'",
                 "🔒".bright_yellow(),
                 u.bright_cyan()
             );
-            PgServer::new(host, port).with_auth(u, p)
+            server.with_auth(u, p)
         }
         (Some(u), None) => {
             println!(
@@ -692,14 +727,14 @@ pub async fn start_pg_server(
                 "⚠".bright_yellow(),
                 u
             );
-            PgServer::new(host, port)
+            server
         }
         _ => {
             println!(
                 "  {} Authentication disabled (no --user specified)",
                 "⚠".bright_yellow()
             );
-            PgServer::new(host, port)
+            server
         }
     };
 
@@ -730,22 +765,36 @@ pub async fn start_pg_server(
     println!("{} Server ready, press Ctrl+C to stop", "✓".bright_green());
     println!();
     println!("Connect with:");
+
+    let ssl_option = if tls_cert.is_some() && tls_key.is_some() {
+        "sslmode=require"
+    } else {
+        ""
+    };
+
     if user.is_some() {
         println!(
             "  {}",
             format!(
-                "psql -h {} -p {} -U {} -d query_engine",
+                "psql -h {} -p {} -U {} -d query_engine {}",
                 host,
                 port,
-                user.as_deref().unwrap_or("postgres")
+                user.as_deref().unwrap_or("postgres"),
+                ssl_option
             )
+            .trim()
             .bright_cyan()
         );
         println!("  (You will be prompted for password)");
     } else {
         println!(
             "  {}",
-            format!("psql -h {} -p {} -U postgres -d query_engine", host, port).bright_cyan()
+            format!(
+                "psql -h {} -p {} -U postgres -d query_engine {}",
+                host, port, ssl_option
+            )
+            .trim()
+            .bright_cyan()
         );
     }
 

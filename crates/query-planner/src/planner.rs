@@ -39,6 +39,18 @@ impl Planner {
             Statement::DropIndex(_) => Err(QueryError::PlanningError(
                 "DROP INDEX is a DDL statement and does not produce a query plan".to_string(),
             )),
+            Statement::CreateTable(_) => Err(QueryError::PlanningError(
+                "CREATE TABLE is a DDL statement and does not produce a query plan".to_string(),
+            )),
+            Statement::Insert(_) => Err(QueryError::PlanningError(
+                "INSERT is a DML statement - use the backend handler directly".to_string(),
+            )),
+            Statement::Update(_) => Err(QueryError::PlanningError(
+                "UPDATE is a DML statement - use the backend handler directly".to_string(),
+            )),
+            Statement::Delete(_) => Err(QueryError::PlanningError(
+                "DELETE is a DML statement - use the backend handler directly".to_string(),
+            )),
         }
     }
 

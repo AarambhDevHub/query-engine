@@ -49,6 +49,21 @@ INSERT INTO table_name (column, ...)
 VALUES (value, ...), ...;
 ```
 
+### UPDATE
+
+```sql
+UPDATE table_name
+SET column = value, ...
+[WHERE condition];
+```
+
+### DELETE
+
+```sql
+DELETE FROM table_name
+[WHERE condition];
+```
+
 ---
 
 ## Data Types

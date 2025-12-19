@@ -82,6 +82,17 @@ pub enum Token {
     Unique,
     Using,
     If,
+    Table,
+    // DML keywords
+    Insert,
+    Into,
+    Values,
+    Update,
+    Set,
+    Delete,
+    // Boolean literals
+    True,
+    False,
     // Index type keywords
     BTree,
     Hash,
@@ -363,6 +374,17 @@ impl Lexer {
             "UNIQUE" => Token::Unique,
             "USING" => Token::Using,
             "IF" => Token::If,
+            "TABLE" => Token::Table,
+            // DML keywords
+            "INSERT" => Token::Insert,
+            "INTO" => Token::Into,
+            "VALUES" => Token::Values,
+            "UPDATE" => Token::Update,
+            "SET" => Token::Set,
+            "DELETE" => Token::Delete,
+            // Boolean literals
+            "TRUE" => Token::True,
+            "FALSE" => Token::False,
             // Index types
             "BTREE" => Token::BTree,
             "HASH" => Token::Hash,

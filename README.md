@@ -10,6 +10,9 @@ A high-performance, production-ready SQL query engine built in Rust with Apache 
 
 - **⚡ High Performance**: Vectorized execution using Apache Arrow for maximum throughput
 - **🔍 SQL Support**: Comprehensive SQL syntax including SELECT, WHERE, GROUP BY, ORDER BY, LIMIT, and JOINs
+- **✏️ Write Operations**: CREATE TABLE, INSERT, UPDATE, DELETE with in-memory storage
+- **🔒 TLS/SSL**: Encrypted PostgreSQL connections with certificate-based security
+- **🔐 Authentication**: MD5 password authentication for secure access
 - **🔗 JOIN Operations**: Full support for INNER, LEFT, RIGHT, FULL OUTER, and CROSS JOINs with table aliases
 - **📦 Subqueries & CTEs**: Common Table Expressions (WITH), scalar subqueries, IN/EXISTS subqueries, derived tables
 - **📈 Window Functions**: ROW_NUMBER, RANK, DENSE_RANK, LAG, LEAD with PARTITION BY and ORDER BY

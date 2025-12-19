@@ -744,9 +744,105 @@ impl QueryBackend {
         }
     }
 
-    /// Handle UPDATE command
+    /// Evaluate a simple WHERE condition for a single row
+    fn evaluate_where_condition(
+        &self,
+        condition: &query_parser::Expr,
+        batch: &arrow::record_batch::RecordBatch,
+        row: usize,
+        schema: &query_core::Schema,
+    ) -> bool {
+        use arrow::array::{BooleanArray, Float64Array, Int64Array, StringArray};
+
+        match condition {
+            query_parser::Expr::BinaryOp { left, op, right } => {
+                // Get column name from left side
+                let col_name = match left.as_ref() {
+                    query_parser::Expr::Column(name) => name.clone(),
+                    _ => return true, // Complex expression - match all
+                };
+
+                // Get literal value from right side
+                let literal_str = match right.as_ref() {
+                    query_parser::Expr::Literal(query_parser::Literal::Number(n)) => n.clone(),
+                    query_parser::Expr::Literal(query_parser::Literal::String(s)) => s.clone(),
+                    query_parser::Expr::Literal(query_parser::Literal::Boolean(b)) => {
+                        if *b {
+                            "true".to_string()
+                        } else {
+                            "false".to_string()
+                        }
+                    }
+                    _ => return true,
+                };
+
+                // Find column index
+                let col_idx = schema.fields().iter().position(|f| f.name() == &col_name);
+                let col_idx = match col_idx {
+                    Some(idx) => idx,
+                    None => return true,
+                };
+
+                let column = batch.column(col_idx);
+
+                // Compare based on type
+                let matches = if let Some(arr) = column.as_any().downcast_ref::<Int64Array>() {
+                    let val = arr.value(row);
+                    let cmp_val: i64 = literal_str.parse().unwrap_or(0);
+                    match op {
+                        query_parser::BinaryOperator::Equal => val == cmp_val,
+                        query_parser::BinaryOperator::NotEqual => val != cmp_val,
+                        query_parser::BinaryOperator::Less => val < cmp_val,
+                        query_parser::BinaryOperator::LessEqual => val <= cmp_val,
+                        query_parser::BinaryOperator::Greater => val > cmp_val,
+                        query_parser::BinaryOperator::GreaterEqual => val >= cmp_val,
+                        _ => true,
+                    }
+                } else if let Some(arr) = column.as_any().downcast_ref::<Float64Array>() {
+                    let val = arr.value(row);
+                    let cmp_val: f64 = literal_str.parse().unwrap_or(0.0);
+                    match op {
+                        query_parser::BinaryOperator::Equal => (val - cmp_val).abs() < f64::EPSILON,
+                        query_parser::BinaryOperator::NotEqual => {
+                            (val - cmp_val).abs() >= f64::EPSILON
+                        }
+                        query_parser::BinaryOperator::Less => val < cmp_val,
+                        query_parser::BinaryOperator::LessEqual => val <= cmp_val,
+                        query_parser::BinaryOperator::Greater => val > cmp_val,
+                        query_parser::BinaryOperator::GreaterEqual => val >= cmp_val,
+                        _ => true,
+                    }
+                } else if let Some(arr) = column.as_any().downcast_ref::<StringArray>() {
+                    let val = arr.value(row);
+                    match op {
+                        query_parser::BinaryOperator::Equal => val == literal_str,
+                        query_parser::BinaryOperator::NotEqual => val != literal_str,
+                        _ => true,
+                    }
+                } else if let Some(arr) = column.as_any().downcast_ref::<BooleanArray>() {
+                    let val = arr.value(row);
+                    let cmp_val = literal_str == "true" || literal_str == "1";
+                    match op {
+                        query_parser::BinaryOperator::Equal => val == cmp_val,
+                        query_parser::BinaryOperator::NotEqual => val != cmp_val,
+                        _ => true,
+                    }
+                } else {
+                    true
+                };
+
+                matches
+            }
+            _ => true, // Complex conditions - match all for safety
+        }
+    }
+
+    /// Handle UPDATE command with WHERE clause support
     async fn handle_update(&self, sql: &str) -> PgWireResult<Response<'static>> {
-        use arrow::array::{ArrayRef, BooleanBuilder, Float64Builder, Int64Builder, StringBuilder};
+        use arrow::array::{
+            ArrayRef, BooleanArray, BooleanBuilder, Float64Array, Float64Builder, Int64Array,
+            Int64Builder, StringArray, StringBuilder,
+        };
         use arrow::record_batch::RecordBatch;
         use query_parser::Parser;
 
@@ -785,6 +881,15 @@ impl QueryBackend {
                 let num_rows = batch.num_rows();
                 let mut arrays: Vec<ArrayRef> = Vec::new();
 
+                // Determine which rows match the WHERE clause
+                let mut row_matches: Vec<bool> = vec![true; num_rows];
+                if let Some(ref condition) = update.selection {
+                    for row in 0..num_rows {
+                        row_matches[row] =
+                            self.evaluate_where_condition(condition, &batch, row, &schema);
+                    }
+                }
+
                 for (col_idx, field) in schema.fields().iter().enumerate() {
                     let col_name = field.name();
 
@@ -808,34 +913,76 @@ impl QueryBackend {
                             _ => "".to_string(),
                         };
 
-                        // Apply to all rows (no WHERE filtering for simplicity)
+                        // Apply to matching rows only
                         match field.data_type() {
                             query_core::DataType::Int64 => {
                                 let mut builder = Int64Builder::new();
-                                for _ in 0..num_rows {
-                                    builder.append_value(new_value.parse::<i64>().unwrap_or(0));
+                                let orig_arr =
+                                    batch.column(col_idx).as_any().downcast_ref::<Int64Array>();
+                                let new_val: i64 = new_value.parse().unwrap_or(0);
+                                for row in 0..num_rows {
+                                    if row_matches[row] {
+                                        builder.append_value(new_val);
+                                        updated_rows += 1;
+                                    } else if let Some(arr) = orig_arr {
+                                        builder.append_value(arr.value(row));
+                                    } else {
+                                        builder.append_value(0);
+                                    }
                                 }
                                 arrays.push(Arc::new(builder.finish()) as ArrayRef);
                             }
                             query_core::DataType::Float64 => {
                                 let mut builder = Float64Builder::new();
-                                for _ in 0..num_rows {
-                                    builder.append_value(new_value.parse::<f64>().unwrap_or(0.0));
+                                let orig_arr = batch
+                                    .column(col_idx)
+                                    .as_any()
+                                    .downcast_ref::<Float64Array>();
+                                let new_val: f64 = new_value.parse().unwrap_or(0.0);
+                                for row in 0..num_rows {
+                                    if row_matches[row] {
+                                        builder.append_value(new_val);
+                                        updated_rows += 1;
+                                    } else if let Some(arr) = orig_arr {
+                                        builder.append_value(arr.value(row));
+                                    } else {
+                                        builder.append_value(0.0);
+                                    }
                                 }
                                 arrays.push(Arc::new(builder.finish()) as ArrayRef);
                             }
                             query_core::DataType::Utf8 => {
                                 let mut builder = StringBuilder::new();
-                                for _ in 0..num_rows {
-                                    builder.append_value(&new_value);
+                                let orig_arr =
+                                    batch.column(col_idx).as_any().downcast_ref::<StringArray>();
+                                for row in 0..num_rows {
+                                    if row_matches[row] {
+                                        builder.append_value(&new_value);
+                                        updated_rows += 1;
+                                    } else if let Some(arr) = orig_arr {
+                                        builder.append_value(arr.value(row));
+                                    } else {
+                                        builder.append_value("");
+                                    }
                                 }
                                 arrays.push(Arc::new(builder.finish()) as ArrayRef);
                             }
                             query_core::DataType::Boolean => {
                                 let mut builder = BooleanBuilder::new();
+                                let orig_arr = batch
+                                    .column(col_idx)
+                                    .as_any()
+                                    .downcast_ref::<BooleanArray>();
                                 let bool_val = new_value == "true" || new_value == "1";
-                                for _ in 0..num_rows {
-                                    builder.append_value(bool_val);
+                                for row in 0..num_rows {
+                                    if row_matches[row] {
+                                        builder.append_value(bool_val);
+                                        updated_rows += 1;
+                                    } else if let Some(arr) = orig_arr {
+                                        builder.append_value(arr.value(row));
+                                    } else {
+                                        builder.append_value(false);
+                                    }
                                 }
                                 arrays.push(Arc::new(builder.finish()) as ArrayRef);
                             }
@@ -844,7 +991,6 @@ impl QueryBackend {
                                 arrays.push(Arc::clone(batch.column(col_idx)));
                             }
                         }
-                        updated_rows += num_rows;
                     } else {
                         // Keep original column
                         arrays.push(Arc::clone(batch.column(col_idx)));
@@ -870,17 +1016,24 @@ impl QueryBackend {
                 },
             );
 
-            info!("Updated {} rows in {}", updated_rows, table_name);
+            // Adjust count (updated_rows counts each column update, divide by assignments)
+            let actual_rows = updated_rows / update.assignments.len().max(1);
+            info!("Updated {} rows in {}", actual_rows, table_name);
             Ok(Response::Execution(pgwire::api::results::Tag::new(
-                &format!("UPDATE {}", updated_rows / update.assignments.len().max(1)),
+                &format!("UPDATE {}", actual_rows),
             )))
         } else {
             Err(user_error("Invalid UPDATE statement".to_string()))
         }
     }
 
-    /// Handle DELETE command
+    /// Handle DELETE command with WHERE clause support
     async fn handle_delete(&self, sql: &str) -> PgWireResult<Response<'static>> {
+        use arrow::array::{
+            ArrayRef, BooleanArray, BooleanBuilder, Float64Array, Float64Builder, Int64Array,
+            Int64Builder, StringArray, StringBuilder,
+        };
+        use arrow::record_batch::RecordBatch;
         use query_parser::Parser;
 
         let mut parser = Parser::new(sql).map_err(|e| user_error(format!("Parse error: {}", e)))?;
@@ -903,13 +1056,9 @@ impl QueryBackend {
                 (entry.schema.clone(), batches, delete.table.clone())
             };
 
-            // Count total rows before delete
-            let total_rows: usize = existing_batches.iter().map(|b| b.num_rows()).sum();
-            let deleted_rows: usize;
-
             // If no WHERE clause, delete all rows
             if delete.selection.is_none() {
-                deleted_rows = total_rows;
+                let total_rows: usize = existing_batches.iter().map(|b| b.num_rows()).sum();
 
                 // Create empty data source
                 let new_source = Arc::new(MemoryDataSource::new(schema.clone(), vec![]));
@@ -923,21 +1072,121 @@ impl QueryBackend {
                         source: new_source,
                     },
                 );
-            } else {
-                // For WHERE clause, we'd need to evaluate expressions
-                // For simplicity, delete all rows when WHERE is present too
-                deleted_rows = total_rows;
 
-                let new_source = Arc::new(MemoryDataSource::new(schema.clone(), vec![]));
-                let mut tables = self.tables.write().await;
-                tables.insert(
-                    table_name.clone(),
-                    TableEntry {
-                        schema,
-                        source: new_source,
-                    },
-                );
+                info!("Deleted {} rows from {}", total_rows, table_name);
+                return Ok(Response::Execution(pgwire::api::results::Tag::new(
+                    &format!("DELETE {}", total_rows),
+                )));
             }
+
+            // With WHERE clause - filter and keep non-matching rows
+            let condition = delete.selection.as_ref().unwrap();
+            let mut deleted_rows = 0;
+            let mut new_batches = Vec::new();
+
+            for batch in existing_batches {
+                let num_rows = batch.num_rows();
+
+                // Determine which rows match the WHERE clause (to delete)
+                let mut row_matches: Vec<bool> = vec![false; num_rows];
+                for row in 0..num_rows {
+                    row_matches[row] =
+                        self.evaluate_where_condition(condition, &batch, row, &schema);
+                    if row_matches[row] {
+                        deleted_rows += 1;
+                    }
+                }
+
+                // Count kept rows
+                let kept_rows: usize = row_matches.iter().filter(|&&m| !m).count();
+                if kept_rows == 0 {
+                    continue; // All rows deleted from this batch
+                }
+
+                // Build new arrays with only non-matching (kept) rows
+                let mut arrays: Vec<ArrayRef> = Vec::new();
+
+                for (col_idx, field) in schema.fields().iter().enumerate() {
+                    match field.data_type() {
+                        query_core::DataType::Int64 => {
+                            let mut builder = Int64Builder::new();
+                            let arr = batch.column(col_idx).as_any().downcast_ref::<Int64Array>();
+                            for row in 0..num_rows {
+                                if !row_matches[row] {
+                                    if let Some(a) = arr {
+                                        builder.append_value(a.value(row));
+                                    }
+                                }
+                            }
+                            arrays.push(Arc::new(builder.finish()) as ArrayRef);
+                        }
+                        query_core::DataType::Float64 => {
+                            let mut builder = Float64Builder::new();
+                            let arr = batch
+                                .column(col_idx)
+                                .as_any()
+                                .downcast_ref::<Float64Array>();
+                            for row in 0..num_rows {
+                                if !row_matches[row] {
+                                    if let Some(a) = arr {
+                                        builder.append_value(a.value(row));
+                                    }
+                                }
+                            }
+                            arrays.push(Arc::new(builder.finish()) as ArrayRef);
+                        }
+                        query_core::DataType::Utf8 => {
+                            let mut builder = StringBuilder::new();
+                            let arr = batch.column(col_idx).as_any().downcast_ref::<StringArray>();
+                            for row in 0..num_rows {
+                                if !row_matches[row] {
+                                    if let Some(a) = arr {
+                                        builder.append_value(a.value(row));
+                                    }
+                                }
+                            }
+                            arrays.push(Arc::new(builder.finish()) as ArrayRef);
+                        }
+                        query_core::DataType::Boolean => {
+                            let mut builder = BooleanBuilder::new();
+                            let arr = batch
+                                .column(col_idx)
+                                .as_any()
+                                .downcast_ref::<BooleanArray>();
+                            for row in 0..num_rows {
+                                if !row_matches[row] {
+                                    if let Some(a) = arr {
+                                        builder.append_value(a.value(row));
+                                    }
+                                }
+                            }
+                            arrays.push(Arc::new(builder.finish()) as ArrayRef);
+                        }
+                        _ => {
+                            // For unsupported types, skip (shouldn't happen often)
+                            arrays.push(Arc::clone(batch.column(col_idx)));
+                        }
+                    }
+                }
+
+                let arrow_schema = Arc::new(schema.to_arrow());
+                let new_batch = RecordBatch::try_new(arrow_schema, arrays)
+                    .map_err(|e| user_error(format!("Failed to create batch: {}", e)))?;
+                new_batches.push(new_batch);
+            }
+
+            // Create new data source with remaining data
+            let new_source = Arc::new(MemoryDataSource::new(schema.clone(), new_batches));
+
+            // Replace the table entry
+            let mut tables = self.tables.write().await;
+            tables.insert(
+                table_name.clone(),
+                TableEntry {
+                    schema,
+                    source: new_source,
+                },
+            );
 
             info!("Deleted {} rows from {}", deleted_rows, table_name);
             Ok(Response::Execution(pgwire::api::results::Tag::new(

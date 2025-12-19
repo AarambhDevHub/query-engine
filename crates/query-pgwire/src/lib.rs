@@ -9,6 +9,7 @@
 //! - **Simple Query Protocol**: Text-based SQL queries
 //! - **Extended Query Protocol**: Prepared statements and parameter binding
 //! - **MD5 Authentication**: Password-based authentication
+//! - **TLS/SSL**: Encrypted connections
 //!
 //! # Example - Basic Server (No Authentication)
 //!
@@ -37,12 +38,28 @@
 //!     Ok(())
 //! }
 //! ```
+//!
+//! # Example - Server with TLS
+//!
+//! ```no_run
+//! use query_pgwire::{PgServer, TlsConfig};
+//!
+//! #[tokio::main]
+//! async fn main() -> anyhow::Result<()> {
+//!     let tls = TlsConfig::new("server.crt", "server.key");
+//!     let server = PgServer::new("0.0.0.0", 5432)
+//!         .with_tls(tls);
+//!     server.start().await?;
+//!     Ok(())
+//! }
+//! ```
 
 pub mod auth;
 pub mod backend;
 pub mod extended;
 pub mod result;
 pub mod server;
+pub mod tls;
 
 // Authentication exports
 pub use auth::AuthConfig;
@@ -58,3 +75,6 @@ pub use result::{arrow_to_pg_type, record_batch_to_rows, schema_to_field_info};
 
 // Server exports
 pub use server::PgServer;
+
+// TLS exports
+pub use tls::TlsConfig;

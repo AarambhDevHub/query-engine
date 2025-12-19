@@ -165,6 +165,14 @@ enum Commands {
         /// Password for authentication (requires --user)
         #[arg(long)]
         password: Option<String>,
+
+        /// TLS certificate file path (PEM format, enables TLS)
+        #[arg(long)]
+        tls_cert: Option<String>,
+
+        /// TLS private key file path (PEM format, requires --tls-cert)
+        #[arg(long)]
+        tls_key: Option<String>,
     },
 }
 
@@ -243,8 +251,10 @@ async fn main() -> Result<()> {
             load,
             user,
             password,
+            tls_cert,
+            tls_key,
         }) => {
-            start_pg_server(&host, port, &load, user, password).await?;
+            start_pg_server(&host, port, &load, user, password, tls_cert, tls_key).await?;
         }
         None => {
             // Default: Start REPL

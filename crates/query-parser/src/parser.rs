@@ -26,6 +26,18 @@ impl Parser {
         if self.current_token() == &Token::Drop {
             return self.parse_drop_statement();
         }
+        // Check for INSERT statement
+        if self.current_token() == &Token::Insert {
+            return self.parse_insert_statement();
+        }
+        // Check for UPDATE statement
+        if self.current_token() == &Token::Update {
+            return self.parse_update_statement();
+        }
+        // Check for DELETE statement
+        if self.current_token() == &Token::Delete {
+            return self.parse_delete_statement();
+        }
         // Check for WITH clause (CTE)
         if self.current_token() == &Token::With {
             return self.parse_with_statement();
@@ -33,11 +45,16 @@ impl Parser {
         self.parse_select()
     }
 
-    /// Parse CREATE statement (currently only CREATE INDEX)
+    /// Parse CREATE statement (CREATE INDEX or CREATE TABLE)
     fn parse_create_statement(&mut self) -> Result<Statement> {
         self.expect_token(&Token::Create)?;
 
-        // Check for UNIQUE modifier
+        // Check for TABLE keyword
+        if self.match_token(&Token::Table) {
+            return self.parse_create_table();
+        }
+
+        // Check for UNIQUE modifier (for INDEX)
         let unique = self.match_token(&Token::Unique);
 
         // Expect INDEX keyword
@@ -85,6 +102,190 @@ impl Parser {
             unique,
             index_type,
         }))
+    }
+
+    /// Parse CREATE TABLE name (col1 type, col2 type, ...)
+    fn parse_create_table(&mut self) -> Result<Statement> {
+        // Check for IF NOT EXISTS
+        let if_not_exists = if self.match_token(&Token::If) {
+            self.expect_token(&Token::Not)?;
+            self.expect_token(&Token::Exists)?;
+            true
+        } else {
+            false
+        };
+
+        // Parse table name
+        let name = self.parse_identifier()?;
+
+        // Parse column definitions
+        self.expect_token(&Token::LeftParen)?;
+        let mut columns = Vec::new();
+        loop {
+            let col_name = self.parse_identifier()?;
+            let data_type = self.parse_data_type()?;
+
+            // Check for NOT NULL or NULL
+            let nullable = if self.match_token(&Token::Not) {
+                self.expect_token(&Token::Null)?;
+                false
+            } else {
+                self.match_token(&Token::Null); // consume optional NULL
+                true
+            };
+
+            columns.push(ColumnDef {
+                name: col_name,
+                data_type,
+                nullable,
+            });
+
+            if !self.match_token(&Token::Comma) {
+                break;
+            }
+        }
+        self.expect_token(&Token::RightParen)?;
+
+        Ok(Statement::CreateTable(CreateTableStatement {
+            name,
+            columns,
+            if_not_exists,
+        }))
+    }
+
+    /// Parse a data type (INT, VARCHAR, FLOAT, etc.)
+    fn parse_data_type(&mut self) -> Result<query_core::DataType> {
+        use query_core::DataType;
+
+        match self.current_token() {
+            Token::Identifier(s) => {
+                let type_name = s.to_uppercase();
+                self.advance();
+
+                match type_name.as_str() {
+                    "INT" | "INTEGER" | "BIGINT" => Ok(DataType::Int64),
+                    "SMALLINT" | "TINYINT" => Ok(DataType::Int64),
+                    "FLOAT" | "DOUBLE" | "REAL" | "DECIMAL" | "NUMERIC" => Ok(DataType::Float64),
+                    "VARCHAR" | "CHAR" | "TEXT" | "STRING" => {
+                        // Optionally consume (length)
+                        if self.match_token(&Token::LeftParen) {
+                            self.parse_number()?; // ignore length
+                            self.expect_token(&Token::RightParen)?;
+                        }
+                        Ok(DataType::Utf8)
+                    }
+                    "BOOLEAN" | "BOOL" => Ok(DataType::Boolean),
+                    "DATE" => Ok(DataType::Utf8), // Treat as string for now
+                    "TIMESTAMP" | "DATETIME" => Ok(DataType::Utf8), // Treat as string for now
+                    _ => Err(QueryError::ParseError(format!(
+                        "Unknown data type: {}",
+                        type_name
+                    ))),
+                }
+            }
+            _ => Err(QueryError::ParseError("Expected data type".to_string())),
+        }
+    }
+
+    /// Parse INSERT INTO table [(columns)] VALUES (values), ...
+    fn parse_insert_statement(&mut self) -> Result<Statement> {
+        self.expect_token(&Token::Insert)?;
+        self.expect_token(&Token::Into)?;
+
+        // Parse table name
+        let table = self.parse_identifier()?;
+
+        // Parse optional column list
+        let columns = if self.match_token(&Token::LeftParen) {
+            let mut cols = Vec::new();
+            loop {
+                cols.push(self.parse_identifier()?);
+                if !self.match_token(&Token::Comma) {
+                    break;
+                }
+            }
+            self.expect_token(&Token::RightParen)?;
+            Some(cols)
+        } else {
+            None
+        };
+
+        // Expect VALUES keyword
+        self.expect_token(&Token::Values)?;
+
+        // Parse value rows
+        let mut values = Vec::new();
+        loop {
+            self.expect_token(&Token::LeftParen)?;
+            let row = self.parse_expr_list()?;
+            self.expect_token(&Token::RightParen)?;
+            values.push(row);
+
+            if !self.match_token(&Token::Comma) {
+                break;
+            }
+        }
+
+        Ok(Statement::Insert(InsertStatement {
+            table,
+            columns,
+            values,
+        }))
+    }
+
+    /// Parse UPDATE table SET col=value, ... [WHERE condition]
+    fn parse_update_statement(&mut self) -> Result<Statement> {
+        self.expect_token(&Token::Update)?;
+
+        // Parse table name
+        let table = self.parse_identifier()?;
+
+        // Expect SET keyword
+        self.expect_token(&Token::Set)?;
+
+        // Parse assignments
+        let mut assignments = Vec::new();
+        loop {
+            let column = self.parse_identifier()?;
+            self.expect_token(&Token::Equal)?;
+            let value = self.parse_expr()?;
+            assignments.push(Assignment { column, value });
+
+            if !self.match_token(&Token::Comma) {
+                break;
+            }
+        }
+
+        // Parse optional WHERE clause
+        let selection = if self.match_token(&Token::Where) {
+            Some(self.parse_expr()?)
+        } else {
+            None
+        };
+
+        Ok(Statement::Update(UpdateStatement {
+            table,
+            assignments,
+            selection,
+        }))
+    }
+
+    /// Parse DELETE FROM table [WHERE condition]
+    fn parse_delete_statement(&mut self) -> Result<Statement> {
+        self.expect_token(&Token::Delete)?;
+        self.expect_token(&Token::From)?;
+
+        // Parse table name
+        let table = self.parse_identifier()?;
+
+        // Parse optional WHERE clause
+        let selection = if self.match_token(&Token::Where) {
+            Some(self.parse_expr()?)
+        } else {
+            None
+        };
+
+        Ok(Statement::Delete(DeleteStatement { table, selection }))
     }
 
     /// Parse DROP statement (currently only DROP INDEX)
@@ -648,6 +849,14 @@ impl Parser {
             Token::Null => {
                 self.advance();
                 Ok(Expr::Literal(Literal::Null))
+            }
+            Token::True => {
+                self.advance();
+                Ok(Expr::Literal(Literal::Boolean(true)))
+            }
+            Token::False => {
+                self.advance();
+                Ok(Expr::Literal(Literal::Boolean(false)))
             }
             _ => Err(QueryError::ParseError(format!(
                 "Unexpected token: {:?}",

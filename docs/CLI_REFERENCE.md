@@ -135,6 +135,9 @@ qe pg-server --host 127.0.0.1 --port 5433
 
 # With MD5 password authentication
 qe pg-server --user admin --password secret123 --load users=data/users.csv
+
+# With TLS encryption
+qe pg-server --tls-cert server.crt --tls-key server.key
 ```
 
 **Options:**
@@ -143,6 +146,8 @@ qe pg-server --user admin --password secret123 --load users=data/users.csv
 - `-l, --load <NAME=PATH>` - Load CSV files as tables
 - `-u, --user <USERNAME>` - Username for MD5 authentication (enables auth)
 - `--password <PASSWORD>` - Password for authentication (requires --user)
+- `--tls-cert <PATH>` - Path to TLS certificate (PEM format)
+- `--tls-key <PATH>` - Path to TLS private key (PEM format)
 
 **Connect with psql:**
 ```bash
@@ -152,6 +157,9 @@ psql -h localhost -p 5432
 # With authentication
 psql -h localhost -p 5432 -U admin
 # Enter password when prompted
+
+# With TLS
+PGSSLMODE=require psql -h localhost -p 5432
 ```
 
 ---

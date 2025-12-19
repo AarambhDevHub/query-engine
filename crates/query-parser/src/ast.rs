@@ -11,6 +11,14 @@ pub enum Statement {
     CreateIndex(CreateIndexStatement),
     /// DROP INDEX statement
     DropIndex(DropIndexStatement),
+    /// CREATE TABLE statement
+    CreateTable(CreateTableStatement),
+    /// INSERT statement
+    Insert(InsertStatement),
+    /// UPDATE statement
+    Update(UpdateStatement),
+    /// DELETE statement
+    Delete(DeleteStatement),
 }
 
 /// WITH clause containing one or more CTEs
@@ -277,4 +285,70 @@ pub struct DropIndexStatement {
     pub name: String,
     /// If true, don't error if index doesn't exist
     pub if_exists: bool,
+}
+
+/// CREATE TABLE statement
+/// Syntax: CREATE TABLE [IF NOT EXISTS] name (col1 type, col2 type, ...)
+#[derive(Debug, Clone, PartialEq)]
+pub struct CreateTableStatement {
+    /// Table name
+    pub name: String,
+    /// Column definitions
+    pub columns: Vec<ColumnDef>,
+    /// If true, don't error if table already exists
+    pub if_not_exists: bool,
+}
+
+/// Column definition for CREATE TABLE
+#[derive(Debug, Clone, PartialEq)]
+pub struct ColumnDef {
+    /// Column name
+    pub name: String,
+    /// Column data type
+    pub data_type: DataType,
+    /// Whether column is nullable
+    pub nullable: bool,
+}
+
+/// INSERT statement
+/// Syntax: INSERT INTO table [(columns)] VALUES (values), ...
+#[derive(Debug, Clone, PartialEq)]
+pub struct InsertStatement {
+    /// Table name
+    pub table: String,
+    /// Column names (optional, if None insert all columns)
+    pub columns: Option<Vec<String>>,
+    /// Values to insert (each inner Vec is one row)
+    pub values: Vec<Vec<Expr>>,
+}
+
+/// UPDATE statement
+/// Syntax: UPDATE table SET col=value, ... [WHERE condition]
+#[derive(Debug, Clone, PartialEq)]
+pub struct UpdateStatement {
+    /// Table name
+    pub table: String,
+    /// Column assignments
+    pub assignments: Vec<Assignment>,
+    /// Optional WHERE clause
+    pub selection: Option<Expr>,
+}
+
+/// Column assignment for UPDATE
+#[derive(Debug, Clone, PartialEq)]
+pub struct Assignment {
+    /// Column name
+    pub column: String,
+    /// Value expression
+    pub value: Expr,
+}
+
+/// DELETE statement
+/// Syntax: DELETE FROM table [WHERE condition]
+#[derive(Debug, Clone, PartialEq)]
+pub struct DeleteStatement {
+    /// Table name
+    pub table: String,
+    /// Optional WHERE clause
+    pub selection: Option<Expr>,
 }

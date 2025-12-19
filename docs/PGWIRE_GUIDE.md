@@ -188,13 +188,22 @@ for row in cursor.fetchall():
 
 Current limitations and planned future improvements:
 
+### Implemented (v0.3)
+
+| Feature | Description |
+|---------|-------------|
+| TLS/SSL | Encrypted connections via `--tls-cert` and `--tls-key` |
+| Transactions | BEGIN, COMMIT, ROLLBACK support (auto-commit mode) |
+| CREATE TABLE | Create in-memory tables with typed columns |
+| INSERT | Insert rows with multi-row VALUES support |
+| UPDATE | Update column values (applies to all rows) |
+| DELETE | Delete rows from tables |
+
 ### Not Yet Implemented
 
 | Feature | Priority | Description |
 |---------|----------|-------------|
-| TLS/SSL | Medium | Encrypted connections |
-| Transactions | Medium | BEGIN, COMMIT, ROLLBACK support |
-| CREATE/INSERT/UPDATE/DELETE | Medium | Write operations (currently read-only) |
+| WHERE in UPDATE/DELETE | Medium | Filter which rows to modify |
 | System Catalogs | Low | `pg_catalog` tables for introspection |
 | COPY Command | Low | Bulk data import/export |
 | Cursors | Low | Server-side cursor support |
@@ -202,8 +211,6 @@ Current limitations and planned future improvements:
 
 ### Current Workarounds
 
-- **No TLS**: Use secure network (VPN, private network) for sensitive data
-- **No Transactions**: Each query auto-commits
 - **No COPY**: Use `--load` flag or `register_table()` API
 - **No System Catalogs**: Use `SHOW TABLES` and `DESCRIBE table`
 

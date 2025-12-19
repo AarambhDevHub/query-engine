@@ -196,14 +196,13 @@ Current limitations and planned future improvements:
 | Transactions | BEGIN, COMMIT, ROLLBACK support (auto-commit mode) |
 | CREATE TABLE | Create in-memory tables with typed columns |
 | INSERT | Insert rows with multi-row VALUES support |
-| UPDATE | Update column values (applies to all rows) |
-| DELETE | Delete rows from tables |
+| UPDATE | Update column values with WHERE clause filtering |
+| DELETE | Delete rows with WHERE clause filtering |
 
 ### Not Yet Implemented
 
 | Feature | Priority | Description |
 |---------|----------|-------------|
-| WHERE in UPDATE/DELETE | Medium | Filter which rows to modify |
 | System Catalogs | Low | `pg_catalog` tables for introspection |
 | COPY Command | Low | Bulk data import/export |
 | Cursors | Low | Server-side cursor support |

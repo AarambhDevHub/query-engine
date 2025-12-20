@@ -153,7 +153,7 @@ impl Parser {
         }))
     }
 
-    /// Parse a data type (INT, VARCHAR, FLOAT, etc.)
+    /// Parse a data type (INT, VARCHAR, FLOAT, UUID, JSON, etc.)
     fn parse_data_type(&mut self) -> Result<query_core::DataType> {
         use query_core::DataType;
 
@@ -162,25 +162,67 @@ impl Parser {
                 let type_name = s.to_uppercase();
                 self.advance();
 
-                match type_name.as_str() {
-                    "INT" | "INTEGER" | "BIGINT" => Ok(DataType::Int64),
-                    "SMALLINT" | "TINYINT" => Ok(DataType::Int64),
-                    "FLOAT" | "DOUBLE" | "REAL" | "DECIMAL" | "NUMERIC" => Ok(DataType::Float64),
+                let base_type = match type_name.as_str() {
+                    "INT" | "INTEGER" | "BIGINT" | "INT8" => DataType::Int64,
+                    "SMALLINT" | "INT2" => DataType::Int16,
+                    "INT4" => DataType::Int32,
+                    "TINYINT" => DataType::Int8,
+                    "FLOAT" | "DOUBLE" | "REAL" | "FLOAT8" => DataType::Float64,
+                    "FLOAT4" => DataType::Float32,
+                    "DECIMAL" | "NUMERIC" => {
+                        // Parse optional precision and scale: DECIMAL(p, s)
+                        let (precision, scale) = if self.match_token(&Token::LeftParen) {
+                            let p = self.parse_number()? as u8;
+                            let s = if self.match_token(&Token::Comma) {
+                                self.parse_number()? as i8
+                            } else {
+                                0
+                            };
+                            self.expect_token(&Token::RightParen)?;
+                            (p, s)
+                        } else {
+                            (38, 9) // PostgreSQL default
+                        };
+                        DataType::Decimal128 { precision, scale }
+                    }
                     "VARCHAR" | "CHAR" | "TEXT" | "STRING" => {
                         // Optionally consume (length)
                         if self.match_token(&Token::LeftParen) {
                             self.parse_number()?; // ignore length
                             self.expect_token(&Token::RightParen)?;
                         }
-                        Ok(DataType::Utf8)
+                        DataType::Utf8
                     }
-                    "BOOLEAN" | "BOOL" => Ok(DataType::Boolean),
-                    "DATE" => Ok(DataType::Utf8), // Treat as string for now
-                    "TIMESTAMP" | "DATETIME" => Ok(DataType::Utf8), // Treat as string for now
-                    _ => Err(QueryError::ParseError(format!(
-                        "Unknown data type: {}",
-                        type_name
-                    ))),
+                    "BOOLEAN" | "BOOL" => DataType::Boolean,
+                    "DATE" => DataType::Date32,
+                    "TIMESTAMP" | "DATETIME" | "TIMESTAMPTZ" => DataType::Timestamp,
+                    // New types
+                    "UUID" => DataType::Uuid,
+                    "JSON" | "JSONB" => DataType::Json,
+                    "BYTEA" | "BLOB" | "BINARY" => DataType::LargeBinary,
+                    "INTERVAL" => DataType::Interval,
+                    // Geometric types
+                    "POINT" => DataType::Point,
+                    "LINE" => DataType::Line,
+                    "LSEG" => DataType::LineSegment,
+                    "BOX" => DataType::Box,
+                    "PATH" => DataType::Path,
+                    "POLYGON" => DataType::Polygon,
+                    "CIRCLE" => DataType::Circle,
+                    _ => {
+                        return Err(QueryError::ParseError(format!(
+                            "Unknown data type: {}",
+                            type_name
+                        )));
+                    }
+                };
+
+                // Check for array suffix: INT[]
+                if self.match_token(&Token::LeftBracket) {
+                    self.expect_token(&Token::RightBracket)?;
+                    Ok(DataType::List(Box::new(base_type)))
+                } else {
+                    Ok(base_type)
                 }
             }
             _ => Err(QueryError::ParseError("Expected data type".to_string())),

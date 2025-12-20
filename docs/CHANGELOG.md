@@ -48,6 +48,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **PortalStore** for persistent portal storage
 - Result pagination via extended query protocol
 
+#### Extended Data Types
+- **UUID** - Universally Unique Identifier type
+- **DECIMAL/NUMERIC** - High-precision decimal with precision and scale
+- **JSON/JSONB** - JSON document storage
+- **INTERVAL** - Time interval type
+- **BYTEA/BLOB** - Large binary data
+- **ARRAY types** - `INT[]`, `TEXT[]` array syntax
+- **Geometric types** - POINT, LINE, LSEG, BOX, PATH, POLYGON, CIRCLE
+- **ENUM** - User-defined enumeration type
+
 ---
 
 ## [0.2.0] - 2025-12-15

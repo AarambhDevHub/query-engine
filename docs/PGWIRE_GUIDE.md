@@ -209,15 +209,6 @@ Current limitations and planned future improvements:
 The following PostgreSQL features are **not supported** in this implementation:
 
 | Category | Feature | Notes |
-|----------|---------|-------|
-| **Data Types** | ARRAY types | Arrays not supported |
-| | JSON/JSONB | Use TEXT with application-level parsing |
-| | UUID | Use TEXT format |
-| | NUMERIC/DECIMAL | Use FLOAT64 |
-| | BYTEA | Binary data partially supported |
-| | Interval | Time intervals not implemented |
-| | Geometric types | POINT, LINE, etc. not supported |
-| | ENUM types | Not supported |
 | **Query Features** | RETURNING clause | INSERT/UPDATE/DELETE don't return rows |
 | | UPSERT (ON CONFLICT) | Not implemented |
 | | Recursive CTEs | WITH RECURSIVE not supported |

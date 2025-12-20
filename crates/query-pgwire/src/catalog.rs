@@ -165,6 +165,20 @@ async fn handle_pg_type() -> PgWireResult<Vec<Response<'static>>> {
         (1082, "date", 4),      // DATE
         (1114, "timestamp", 8), // TIMESTAMP
         (17, "bytea", -1),      // BINARY
+        // New types
+        (2950, "uuid", 16),     // UUID
+        (1700, "numeric", -1),  // DECIMAL/NUMERIC
+        (1186, "interval", 16), // INTERVAL
+        (114, "json", -1),      // JSON
+        (3802, "jsonb", -1),    // JSONB
+        // Geometric types
+        (600, "point", 16),   // POINT
+        (628, "line", 24),    // LINE
+        (601, "lseg", 32),    // LSEG
+        (603, "box", 32),     // BOX
+        (602, "path", -1),    // PATH
+        (604, "polygon", -1), // POLYGON
+        (718, "circle", 24),  // CIRCLE
     ];
 
     let oids: Vec<i32> = types.iter().map(|(oid, _, _)| *oid).collect();
@@ -252,13 +266,30 @@ fn datatype_to_pg_oid(dt: &query_core::DataType) -> i32 {
         query_core::DataType::UInt8 | query_core::DataType::UInt16 => 21,
         query_core::DataType::UInt32 => 23,
         query_core::DataType::UInt64 => 20,
-        query_core::DataType::Float32 => 700, // float4
-        query_core::DataType::Float64 => 701, // float8
-        query_core::DataType::Utf8 => 25,     // text
-        query_core::DataType::Binary => 17,   // bytea
-        query_core::DataType::Boolean => 16,  // bool
+        query_core::DataType::Float32 => 700,    // float4
+        query_core::DataType::Float64 => 701,    // float8
+        query_core::DataType::Utf8 => 25,        // text
+        query_core::DataType::Binary => 17,      // bytea
+        query_core::DataType::LargeBinary => 17, // bytea
+        query_core::DataType::Boolean => 16,     // bool
         query_core::DataType::Date32 | query_core::DataType::Date64 => 1082, // date
         query_core::DataType::Timestamp => 1114, // timestamp
+        // New types
+        query_core::DataType::Uuid => 2950,              // uuid
+        query_core::DataType::Decimal128 { .. } => 1700, // numeric
+        query_core::DataType::Interval => 1186,          // interval
+        query_core::DataType::Json => 114,               // json
+        query_core::DataType::List(_) => 0,              // arrays need special handling
+        // Geometric types
+        query_core::DataType::Point => 600,       // point
+        query_core::DataType::Line => 628,        // line
+        query_core::DataType::LineSegment => 601, // lseg
+        query_core::DataType::Box => 603,         // box
+        query_core::DataType::Path => 602,        // path
+        query_core::DataType::Polygon => 604,     // polygon
+        query_core::DataType::Circle => 718,      // circle
+        // Enum (user-defined)
+        query_core::DataType::Enum { .. } => 0, // custom enum OID
         query_core::DataType::Null => 0,
     }
 }
@@ -278,9 +309,28 @@ fn datatype_to_pg_name(dt: &query_core::DataType) -> String {
         query_core::DataType::Float64 => "double precision".to_string(),
         query_core::DataType::Utf8 => "text".to_string(),
         query_core::DataType::Binary => "bytea".to_string(),
+        query_core::DataType::LargeBinary => "bytea".to_string(),
         query_core::DataType::Boolean => "boolean".to_string(),
         query_core::DataType::Date32 | query_core::DataType::Date64 => "date".to_string(),
         query_core::DataType::Timestamp => "timestamp".to_string(),
+        // New types
+        query_core::DataType::Uuid => "uuid".to_string(),
+        query_core::DataType::Decimal128 { precision, scale } => {
+            format!("numeric({},{})", precision, scale)
+        }
+        query_core::DataType::Interval => "interval".to_string(),
+        query_core::DataType::Json => "json".to_string(),
+        query_core::DataType::List(inner) => format!("{}[]", datatype_to_pg_name(inner)),
+        // Geometric types
+        query_core::DataType::Point => "point".to_string(),
+        query_core::DataType::Line => "line".to_string(),
+        query_core::DataType::LineSegment => "lseg".to_string(),
+        query_core::DataType::Box => "box".to_string(),
+        query_core::DataType::Path => "path".to_string(),
+        query_core::DataType::Polygon => "polygon".to_string(),
+        query_core::DataType::Circle => "circle".to_string(),
+        // Enum
+        query_core::DataType::Enum { name, .. } => name.clone(),
         query_core::DataType::Null => "unknown".to_string(),
     }
 }

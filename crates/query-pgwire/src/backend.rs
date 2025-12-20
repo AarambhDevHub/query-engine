@@ -792,6 +792,9 @@ impl QueryBackend {
             let new_batch = RecordBatch::try_new(arrow_schema, arrays)
                 .map_err(|e| user_error(format!("Failed to create batch: {}", e)))?;
 
+            // Save the batch for RETURNING before adding to existing
+            let inserted_batch = new_batch.clone();
+
             // Add new batch to existing batches
             existing_batches.push(new_batch);
 
@@ -809,6 +812,25 @@ impl QueryBackend {
             );
 
             info!("Inserted {} rows into {}", row_count, table_name);
+
+            // Handle RETURNING clause
+            if let Some(returning) = &insert.returning {
+                // For RETURNING *, return the new batch
+                let should_return_all = returning
+                    .iter()
+                    .any(|item| matches!(item, query_parser::SelectItem::Wildcard));
+
+                if should_return_all {
+                    let field_info = crate::result::schema_to_field_info(&inserted_batch.schema());
+                    let rows = crate::result::record_batch_to_rows(&inserted_batch, &field_info)?;
+                    let all_rows: Vec<_> = rows.into_iter().map(|r| r.finish()).collect();
+                    return Ok(Response::Query(pgwire::api::results::QueryResponse::new(
+                        Arc::new(field_info),
+                        futures::stream::iter(all_rows),
+                    )));
+                }
+            }
+
             Ok(Response::Execution(pgwire::api::results::Tag::new(
                 &format!("INSERT 0 {}", row_count),
             )))

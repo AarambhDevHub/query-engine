@@ -90,6 +90,7 @@ pub enum Token {
     Update,
     Set,
     Delete,
+    Returning,
     // Boolean literals
     True,
     False,
@@ -392,6 +393,7 @@ impl Lexer {
             "UPDATE" => Token::Update,
             "SET" => Token::Set,
             "DELETE" => Token::Delete,
+            "RETURNING" => Token::Returning,
             // Boolean literals
             "TRUE" => Token::True,
             "FALSE" => Token::False,

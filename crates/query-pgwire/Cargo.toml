@@ -16,7 +16,7 @@ query-executor = { path = "../query-executor" }
 query-storage = { path = "../query-storage" }
 
 # PostgreSQL wire protocol
-pgwire = "0.28"
+pgwire = { version = "0.28", features = ["scram"] }
 
 # Async runtime
 tokio.workspace = true

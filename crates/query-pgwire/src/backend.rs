@@ -1,6 +1,7 @@
 //! Query processing backend for PostgreSQL protocol
 
 use crate::auth::{AuthConfig, create_md5_auth_handler};
+use crate::cursor::CursorManager;
 use crate::extended::QueryExtendedHandler;
 use crate::result::{record_batch_to_rows, schema_to_field_info};
 use async_trait::async_trait;
@@ -27,6 +28,8 @@ use tracing::{debug, error, info};
 pub struct QueryBackend {
     /// Registered tables with their schemas and data sources
     tables: Arc<RwLock<HashMap<String, TableEntry>>>,
+    /// Cursor manager for server-side cursors
+    cursors: CursorManager,
 }
 
 pub struct TableEntry {
@@ -48,12 +51,16 @@ impl QueryBackend {
     pub fn new() -> Self {
         Self {
             tables: Arc::new(RwLock::new(HashMap::new())),
+            cursors: CursorManager::new(),
         }
     }
 
     /// Create a new query backend with shared tables
     pub fn with_tables(tables: Arc<RwLock<HashMap<String, TableEntry>>>) -> Self {
-        Self { tables }
+        Self {
+            tables,
+            cursors: CursorManager::new(),
+        }
     }
 
     /// Register a table with schema and data source
@@ -401,6 +408,72 @@ impl SimpleQueryHandler for QueryBackend {
                 responses.push(Response::Execution(pgwire::api::results::Tag::new(
                     "ROLLBACK",
                 )));
+                continue;
+            }
+
+            // Handle pg_catalog queries (system catalogs)
+            if sql_upper.contains("PG_CATALOG.")
+                || sql_upper.contains("PG_TABLES")
+                || sql_upper.contains("PG_ATTRIBUTE")
+                || sql_upper.contains("PG_TYPE")
+                || sql_upper.contains("INFORMATION_SCHEMA.")
+            {
+                match crate::catalog::handle_pg_catalog_query(sql, &self.tables).await {
+                    Ok(mut resp) => {
+                        for r in resp.drain(..) {
+                            responses.push(unsafe { std::mem::transmute(r) });
+                        }
+                    }
+                    Err(e) => return Err(e),
+                }
+                continue;
+            }
+
+            // Handle COPY command
+            if sql_upper.starts_with("COPY ") {
+                match self.handle_copy(sql).await {
+                    Ok(mut resp) => {
+                        for r in resp.drain(..) {
+                            responses.push(unsafe { std::mem::transmute(r) });
+                        }
+                    }
+                    Err(e) => return Err(e),
+                }
+                continue;
+            }
+
+            // Handle DECLARE cursor
+            if sql_upper.starts_with("DECLARE ") {
+                match self.handle_declare_cursor(sql).await {
+                    Ok(resp) => {
+                        responses.push(resp);
+                    }
+                    Err(e) => return Err(e),
+                }
+                continue;
+            }
+
+            // Handle FETCH from cursor
+            if sql_upper.starts_with("FETCH ") {
+                match self.handle_fetch_cursor(sql).await {
+                    Ok(mut resp) => {
+                        for r in resp.drain(..) {
+                            responses.push(unsafe { std::mem::transmute(r) });
+                        }
+                    }
+                    Err(e) => return Err(e),
+                }
+                continue;
+            }
+
+            // Handle CLOSE cursor
+            if sql_upper.starts_with("CLOSE ") {
+                match self.handle_close_cursor(sql).await {
+                    Ok(resp) => {
+                        responses.push(resp);
+                    }
+                    Err(e) => return Err(e),
+                }
                 continue;
             }
 
@@ -1196,6 +1269,510 @@ impl QueryBackend {
             Err(user_error("Invalid DELETE statement".to_string()))
         }
     }
+
+    /// Handle COPY command - currently supports COPY TO STDOUT
+    async fn handle_copy(&self, sql: &str) -> PgWireResult<Vec<Response<'static>>> {
+        use arrow::array::{Array, BooleanArray, Float64Array, Int64Array, StringArray};
+        use arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
+        use arrow::record_batch::RecordBatch;
+
+        let sql_upper = sql.to_uppercase();
+
+        // Parse COPY syntax: COPY table TO STDOUT [WITH (options)]
+        // or: COPY (query) TO STDOUT [WITH (options)]
+        let parts: Vec<&str> = sql.split_whitespace().collect();
+
+        if parts.len() < 4 {
+            return Err(user_error(
+                "Invalid COPY syntax. Use: COPY table TO STDOUT [WITH (FORMAT csv)]".to_string(),
+            ));
+        }
+
+        // Check if it's COPY TO (export) or COPY FROM (import)
+        let to_idx = parts.iter().position(|p| p.to_uppercase() == "TO");
+        let from_idx = parts.iter().position(|p| p.to_uppercase() == "FROM");
+
+        if let Some(idx) = to_idx {
+            // COPY TO (export)
+            let table_name = parts[1].trim_matches(|c| c == '(' || c == ')');
+
+            // Check for STDOUT
+            if idx + 1 >= parts.len() || parts[idx + 1].to_uppercase() != "STDOUT" {
+                return Err(user_error("Only COPY TO STDOUT is supported".to_string()));
+            }
+
+            // Parse options
+            let with_header = sql_upper.contains("HEADER");
+            let _is_csv = sql_upper.contains("CSV") || sql_upper.contains("FORMAT CSV");
+
+            // Get table data
+            let tables = self.tables.read().await;
+            let entry = tables
+                .get(table_name)
+                .ok_or_else(|| user_error(format!("Table not found: {}", table_name)))?;
+
+            let batches = entry
+                .source
+                .scan()
+                .map_err(|e| user_error(format!("Failed to read table: {}", e)))?;
+
+            // Build CSV output
+            let mut csv_lines: Vec<String> = Vec::new();
+
+            // Add header if requested
+            if with_header {
+                let header: Vec<String> = entry
+                    .schema
+                    .fields()
+                    .iter()
+                    .map(|f| f.name().to_string())
+                    .collect();
+                csv_lines.push(header.join(","));
+            }
+
+            // Convert batches to CSV rows
+            for batch in &batches {
+                let num_rows = batch.num_rows();
+                for row in 0..num_rows {
+                    let mut row_values: Vec<String> = Vec::new();
+                    for col_idx in 0..batch.num_columns() {
+                        let column = batch.column(col_idx);
+                        let value = if let Some(arr) = column.as_any().downcast_ref::<Int64Array>()
+                        {
+                            if arr.is_null(row) {
+                                String::new()
+                            } else {
+                                arr.value(row).to_string()
+                            }
+                        } else if let Some(arr) = column.as_any().downcast_ref::<Float64Array>() {
+                            if arr.is_null(row) {
+                                String::new()
+                            } else {
+                                arr.value(row).to_string()
+                            }
+                        } else if let Some(arr) = column.as_any().downcast_ref::<StringArray>() {
+                            if arr.is_null(row) {
+                                String::new()
+                            } else {
+                                // Escape CSV values with quotes if they contain commas
+                                let val = arr.value(row);
+                                if val.contains(',') || val.contains('"') || val.contains('\n') {
+                                    format!("\"{}\"", val.replace('"', "\"\""))
+                                } else {
+                                    val.to_string()
+                                }
+                            }
+                        } else if let Some(arr) = column.as_any().downcast_ref::<BooleanArray>() {
+                            if arr.is_null(row) {
+                                String::new()
+                            } else {
+                                if arr.value(row) { "t" } else { "f" }.to_string()
+                            }
+                        } else {
+                            // Fallback for other types
+                            String::new()
+                        };
+                        row_values.push(value);
+                    }
+                    csv_lines.push(row_values.join(","));
+                }
+            }
+
+            // Return as single-column result with CSV data
+            let schema = Arc::new(ArrowSchema::new(vec![Field::new(
+                "copy_data",
+                DataType::Utf8,
+                false,
+            )]));
+
+            let csv_data: Vec<&str> = csv_lines.iter().map(|s| s.as_str()).collect();
+            let batch = RecordBatch::try_new(
+                schema.clone(),
+                vec![Arc::new(StringArray::from(csv_data)) as arrow::array::ArrayRef],
+            )
+            .map_err(|e| user_error(format!("Error creating COPY result: {}", e)))?;
+
+            let field_info = schema_to_field_info(&schema);
+            let rows = record_batch_to_rows(&batch, &field_info)?;
+            let all_rows: Vec<_> = rows.into_iter().map(|r| r.finish()).collect();
+
+            info!(
+                "COPY: exported {} rows from {}",
+                csv_lines.len(),
+                table_name
+            );
+
+            Ok(vec![Response::Query(QueryResponse::new(
+                Arc::new(field_info),
+                futures::stream::iter(all_rows),
+            ))])
+        } else if let Some(idx) = from_idx {
+            // COPY FROM (import)
+            let table_name = parts[1].trim_matches(|c| c == '(' || c == ')');
+
+            // Check for STDIN
+            if idx + 1 >= parts.len() || parts[idx + 1].to_uppercase() != "STDIN" {
+                return Err(user_error("Only COPY FROM STDIN is supported".to_string()));
+            }
+
+            // Parse options
+            let with_header = sql_upper.contains("HEADER");
+            let delimiter = if sql_upper.contains("DELIMITER") {
+                // Try to extract delimiter - default to comma
+                ','
+            } else {
+                ','
+            };
+
+            // For COPY FROM, we expect the data to follow after the command
+            // PostgreSQL protocol: data comes in subsequent messages terminated by \.
+            // For simple query protocol, we'll parse inline data after the semicolon
+
+            // Look for data after the command - check if there's data in the SQL
+            // Format: COPY table FROM STDIN;\ndata\n\.
+            let sql_with_data = sql;
+            let data_start = sql_with_data.find('\n');
+
+            if data_start.is_none() {
+                // No inline data - return instruction message
+                return Err(user_error(
+                    "COPY FROM STDIN requires data. Format:\nCOPY table FROM STDIN;\nrow1col1,row1col2\nrow2col1,row2col2\n\\.".to_string(),
+                ));
+            }
+
+            let data_section = &sql_with_data[data_start.unwrap() + 1..];
+
+            // Parse CSV lines (terminated by \. or end of input)
+            let mut csv_rows: Vec<Vec<String>> = Vec::new();
+            let mut skip_header = with_header;
+
+            for line in data_section.lines() {
+                let trimmed = line.trim();
+                if trimmed == "\\." || trimmed.is_empty() {
+                    continue;
+                }
+                if skip_header {
+                    skip_header = false;
+                    continue;
+                }
+
+                // Parse CSV row (simple parsing - handles quotes)
+                let row = parse_csv_row(trimmed, delimiter);
+                csv_rows.push(row);
+            }
+
+            if csv_rows.is_empty() {
+                return Ok(vec![Response::Execution(pgwire::api::results::Tag::new(
+                    "COPY 0",
+                ))]);
+            }
+
+            // Get table schema
+            let (schema, mut existing_batches) = {
+                let tables = self.tables.read().await;
+                let entry = tables
+                    .get(table_name)
+                    .ok_or_else(|| user_error(format!("Table not found: {}", table_name)))?;
+                let batches = entry
+                    .source
+                    .scan()
+                    .map_err(|e| user_error(format!("Failed to read table: {}", e)))?;
+                (entry.schema.clone(), batches)
+            };
+
+            let row_count = csv_rows.len();
+
+            // Build arrays from CSV data
+            use arrow::array::{
+                ArrayRef, BooleanBuilder, Float64Builder, Int64Builder, StringBuilder,
+            };
+
+            let mut arrays: Vec<ArrayRef> = Vec::new();
+            for (col_idx, field) in schema.fields().iter().enumerate() {
+                match field.data_type() {
+                    query_core::DataType::Int64 => {
+                        let mut builder = Int64Builder::new();
+                        for row in &csv_rows {
+                            if col_idx < row.len() && !row[col_idx].is_empty() {
+                                let val = row[col_idx].parse::<i64>().unwrap_or(0);
+                                builder.append_value(val);
+                            } else {
+                                builder.append_null();
+                            }
+                        }
+                        arrays.push(Arc::new(builder.finish()) as ArrayRef);
+                    }
+                    query_core::DataType::Float64 => {
+                        let mut builder = Float64Builder::new();
+                        for row in &csv_rows {
+                            if col_idx < row.len() && !row[col_idx].is_empty() {
+                                let val = row[col_idx].parse::<f64>().unwrap_or(0.0);
+                                builder.append_value(val);
+                            } else {
+                                builder.append_null();
+                            }
+                        }
+                        arrays.push(Arc::new(builder.finish()) as ArrayRef);
+                    }
+                    query_core::DataType::Utf8 => {
+                        let mut builder = StringBuilder::new();
+                        for row in &csv_rows {
+                            if col_idx < row.len() {
+                                builder.append_value(&row[col_idx]);
+                            } else {
+                                builder.append_null();
+                            }
+                        }
+                        arrays.push(Arc::new(builder.finish()) as ArrayRef);
+                    }
+                    query_core::DataType::Boolean => {
+                        let mut builder = BooleanBuilder::new();
+                        for row in &csv_rows {
+                            if col_idx < row.len() && !row[col_idx].is_empty() {
+                                let val = matches!(
+                                    row[col_idx].to_lowercase().as_str(),
+                                    "true" | "t" | "1" | "yes" | "y"
+                                );
+                                builder.append_value(val);
+                            } else {
+                                builder.append_null();
+                            }
+                        }
+                        arrays.push(Arc::new(builder.finish()) as ArrayRef);
+                    }
+                    _ => {
+                        // Default to string for unknown types
+                        let mut builder = StringBuilder::new();
+                        for row in &csv_rows {
+                            if col_idx < row.len() {
+                                builder.append_value(&row[col_idx]);
+                            } else {
+                                builder.append_null();
+                            }
+                        }
+                        arrays.push(Arc::new(builder.finish()) as ArrayRef);
+                    }
+                }
+            }
+
+            let arrow_schema = Arc::new(schema.to_arrow());
+            let new_batch = RecordBatch::try_new(arrow_schema, arrays)
+                .map_err(|e| user_error(format!("Failed to create batch: {}", e)))?;
+
+            // Add new batch to existing data
+            existing_batches.push(new_batch);
+
+            // Create new data source
+            let new_source = Arc::new(MemoryDataSource::new(schema.clone(), existing_batches));
+
+            // Update table
+            let mut tables = self.tables.write().await;
+            tables.insert(
+                table_name.to_string(),
+                TableEntry {
+                    schema,
+                    source: new_source,
+                },
+            );
+            info!("COPY: imported {} rows into {}", row_count, table_name);
+
+            Ok(vec![Response::Execution(pgwire::api::results::Tag::new(
+                &format!("COPY {}", row_count),
+            ))])
+        } else {
+            Err(user_error(
+                "Invalid COPY syntax. Use: COPY table TO STDOUT or COPY table FROM STDIN"
+                    .to_string(),
+            ))
+        }
+    }
+
+    /// Handle DECLARE cursor command
+    /// Syntax: DECLARE cursor_name CURSOR FOR SELECT ...
+    async fn handle_declare_cursor<'a>(&self, sql: &str) -> PgWireResult<Response<'a>> {
+        let sql_upper = sql.to_uppercase();
+
+        // Parse: DECLARE cursor_name CURSOR FOR query
+        let cursor_pos = sql_upper.find(" CURSOR ");
+        if cursor_pos.is_none() {
+            return Err(user_error(
+                "Invalid DECLARE syntax. Use: DECLARE cursor_name CURSOR FOR SELECT ..."
+                    .to_string(),
+            ));
+        }
+
+        // Extract cursor name
+        let name_start = "DECLARE ".len();
+        let name_end = cursor_pos.unwrap();
+        let cursor_name = sql[name_start..name_end].trim().to_string();
+
+        // Extract the query after "CURSOR FOR"
+        let for_pos = sql_upper.find(" FOR ");
+        if for_pos.is_none() {
+            return Err(user_error(
+                "Invalid DECLARE syntax. Missing FOR clause.".to_string(),
+            ));
+        }
+
+        let query_start = for_pos.unwrap() + 5; // " FOR " length
+        let query = &sql[query_start..];
+
+        // Execute the query and store results in cursor
+        let tables_snapshot: HashMap<String, TableEntry> = {
+            let tables = self.tables.read().await;
+            tables
+                .iter()
+                .map(|(k, v)| {
+                    (
+                        k.clone(),
+                        TableEntry {
+                            schema: v.schema.clone(),
+                            source: Arc::clone(&v.source),
+                        },
+                    )
+                })
+                .collect()
+        };
+
+        let query_owned = query.to_string();
+        let batches = tokio::task::spawn_blocking(move || {
+            Self::execute_query_sync(&query_owned, tables_snapshot)
+        })
+        .await
+        .map_err(|e| user_error(format!("Task join error: {}", e)))?
+        .map_err(|e| user_error(e))?;
+
+        // Declare the cursor
+        self.cursors.declare(&cursor_name, batches).await;
+
+        Ok(Response::Execution(pgwire::api::results::Tag::new(
+            "DECLARE CURSOR",
+        )))
+    }
+
+    /// Handle FETCH from cursor command
+    /// Syntax: FETCH [count] FROM cursor_name
+    async fn handle_fetch_cursor(&self, sql: &str) -> PgWireResult<Vec<Response<'static>>> {
+        let parts: Vec<&str> = sql.split_whitespace().collect();
+
+        // Parse: FETCH [count] FROM cursor_name
+        // Or: FETCH ALL FROM cursor_name
+        // Or: FETCH cursor_name (fetch 1)
+        let (count, cursor_name) = if parts.len() == 2 {
+            // FETCH cursor_name
+            (1usize, parts[1].to_string())
+        } else if parts.len() >= 4 && parts[2].to_uppercase() == "FROM" {
+            // FETCH count FROM cursor_name or FETCH ALL FROM cursor_name
+            let count = if parts[1].to_uppercase() == "ALL" {
+                usize::MAX
+            } else {
+                parts[1].parse::<usize>().unwrap_or(1)
+            };
+            (count, parts[3].to_string())
+        } else if parts.len() == 3 && parts[1].to_uppercase() == "FROM" {
+            // FETCH FROM cursor_name (fetch 1)
+            (1usize, parts[2].to_string())
+        } else {
+            return Err(user_error(
+                "Invalid FETCH syntax. Use: FETCH [count] FROM cursor_name".to_string(),
+            ));
+        };
+
+        // Fetch from cursor
+        let batches = self.cursors.fetch(&cursor_name, count).await;
+        if batches.is_none() {
+            return Err(user_error(format!("Cursor not found: {}", cursor_name)));
+        }
+
+        let batches = batches.unwrap();
+        if batches.is_empty() {
+            return Ok(vec![Response::EmptyQuery]);
+        }
+
+        // Build response
+        let schema = batches[0].schema();
+        let field_info = schema_to_field_info(&schema);
+
+        let mut all_rows = Vec::new();
+        for batch in &batches {
+            let rows = record_batch_to_rows(batch, &field_info)?;
+            for row in rows {
+                all_rows.push(row.finish());
+            }
+        }
+
+        Ok(vec![Response::Query(QueryResponse::new(
+            Arc::new(field_info),
+            futures::stream::iter(all_rows),
+        ))])
+    }
+
+    /// Handle CLOSE cursor command
+    /// Syntax: CLOSE cursor_name
+    async fn handle_close_cursor<'a>(&self, sql: &str) -> PgWireResult<Response<'a>> {
+        let parts: Vec<&str> = sql.split_whitespace().collect();
+
+        if parts.len() != 2 {
+            return Err(user_error(
+                "Invalid CLOSE syntax. Use: CLOSE cursor_name".to_string(),
+            ));
+        }
+
+        let cursor_name = parts[1];
+
+        if cursor_name.to_uppercase() == "ALL" {
+            // CLOSE ALL - would need additional implementation
+            return Ok(Response::Execution(pgwire::api::results::Tag::new(
+                "CLOSE CURSOR",
+            )));
+        }
+
+        if !self.cursors.close(cursor_name).await {
+            return Err(user_error(format!("Cursor not found: {}", cursor_name)));
+        }
+
+        Ok(Response::Execution(pgwire::api::results::Tag::new(
+            "CLOSE CURSOR",
+        )))
+    }
+}
+
+/// Parse a CSV row, handling quoted fields
+fn parse_csv_row(line: &str, delimiter: char) -> Vec<String> {
+    let mut fields = Vec::new();
+    let mut current_field = String::new();
+    let mut in_quotes = false;
+    let mut chars = line.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if in_quotes {
+            if c == '"' {
+                // Check for escaped quote
+                if chars.peek() == Some(&'"') {
+                    current_field.push('"');
+                    chars.next(); // consume the second quote
+                } else {
+                    in_quotes = false;
+                }
+            } else {
+                current_field.push(c);
+            }
+        } else {
+            if c == '"' {
+                in_quotes = true;
+            } else if c == delimiter {
+                fields.push(current_field.trim().to_string());
+                current_field = String::new();
+            } else {
+                current_field.push(c);
+            }
+        }
+    }
+
+    // Don't forget the last field
+    fields.push(current_field.trim().to_string());
+
+    fields
 }
 
 /// Simple startup handler that accepts all connections (no authentication)

@@ -15,17 +15,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 #### Authentication
 - **MD5 password authentication** via `--user` and `--password` flags
+- **SCRAM-SHA-256 authentication** for enhanced security (use `AuthMethod::ScramSha256`)
 - No-authentication mode for development (default)
 
 #### Write Operations
 - **CREATE TABLE** statement with data type support (INT, VARCHAR, BOOLEAN, etc.)
 - **INSERT INTO** with multi-row VALUES support
-- **UPDATE** with SET clause (all rows affected)
-- **DELETE FROM** statement
+- **UPDATE** with SET clause and WHERE filtering
+- **DELETE FROM** with WHERE filtering
 - **TRUE/FALSE** boolean literals in parser
 
 #### Transaction Commands
 - **BEGIN/COMMIT/ROLLBACK** command recognition (auto-commit mode)
+
+#### System Catalogs
+- **pg_catalog.pg_tables** - List all registered tables
+- **pg_catalog.pg_attribute** - Column metadata
+- **pg_catalog.pg_type** - PostgreSQL type OIDs
+- **information_schema.columns** - Standard SQL column info
+
+#### COPY Command
+- **COPY TO STDOUT** - Export table data as CSV
+- **COPY FROM STDIN** - Import CSV data into tables
+- HEADER option support
+
+#### Server-Side Cursors
+- **DECLARE cursor CURSOR FOR** - Create named cursors
+- **FETCH [count] FROM cursor** - Paginate through results
+- **CLOSE cursor** - Release cursor resources
+
+#### Named Portals
+- **PortalStore** for persistent portal storage
+- Result pagination via extended query protocol
 
 ---
 

@@ -46,6 +46,86 @@ fn user_error(message: String) -> PgWireError {
     )))
 }
 
+/// Build a RETURNING response from a batch and select items
+fn build_returning_response(
+    batch: &arrow::record_batch::RecordBatch,
+    returning: &[query_parser::SelectItem],
+) -> PgWireResult<Response<'static>> {
+    use arrow::array::{Array, BooleanArray, Float64Array, Int64Array, StringArray};
+    use arrow::datatypes::{DataType as ArrowDataType, Field, Schema as ArrowSchema};
+    use arrow::record_batch::RecordBatch;
+
+    // Check if we have RETURNING *
+    let return_all = returning
+        .iter()
+        .any(|item| matches!(item, query_parser::SelectItem::Wildcard));
+
+    if return_all {
+        // Return all columns
+        let field_info = crate::result::schema_to_field_info(&batch.schema());
+        let rows = crate::result::record_batch_to_rows(batch, &field_info)?;
+        let all_rows: Vec<_> = rows.into_iter().map(|r| r.finish()).collect();
+        return Ok(Response::Query(pgwire::api::results::QueryResponse::new(
+            Arc::new(field_info),
+            futures::stream::iter(all_rows),
+        )));
+    }
+
+    // Get specific columns
+    let mut selected_fields: Vec<Field> = Vec::new();
+    let mut selected_columns: Vec<arrow::array::ArrayRef> = Vec::new();
+
+    let schema = batch.schema();
+    for item in returning {
+        match item {
+            query_parser::SelectItem::UnnamedExpr(query_parser::Expr::Column(col_name)) => {
+                // Find column in batch
+                if let Ok(col_idx) = schema.index_of(col_name) {
+                    selected_fields.push(schema.field(col_idx).clone());
+                    selected_columns.push(batch.column(col_idx).clone());
+                }
+            }
+            query_parser::SelectItem::ExprWithAlias { expr, alias } => {
+                if let query_parser::Expr::Column(col_name) = expr {
+                    if let Ok(col_idx) = schema.index_of(col_name) {
+                        let field = schema.field(col_idx);
+                        selected_fields.push(Field::new(
+                            alias,
+                            field.data_type().clone(),
+                            field.is_nullable(),
+                        ));
+                        selected_columns.push(batch.column(col_idx).clone());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if selected_columns.is_empty() {
+        // Fallback to all columns if no specific columns matched
+        let field_info = crate::result::schema_to_field_info(&batch.schema());
+        let rows = crate::result::record_batch_to_rows(batch, &field_info)?;
+        let all_rows: Vec<_> = rows.into_iter().map(|r| r.finish()).collect();
+        return Ok(Response::Query(pgwire::api::results::QueryResponse::new(
+            Arc::new(field_info),
+            futures::stream::iter(all_rows),
+        )));
+    }
+
+    let result_schema = Arc::new(ArrowSchema::new(selected_fields));
+    let result_batch = RecordBatch::try_new(result_schema.clone(), selected_columns)
+        .map_err(|e| user_error(format!("Failed to build RETURNING result: {}", e)))?;
+
+    let field_info = crate::result::schema_to_field_info(&result_schema);
+    let rows = crate::result::record_batch_to_rows(&result_batch, &field_info)?;
+    let all_rows: Vec<_> = rows.into_iter().map(|r| r.finish()).collect();
+    Ok(Response::Query(pgwire::api::results::QueryResponse::new(
+        Arc::new(field_info),
+        futures::stream::iter(all_rows),
+    )))
+}
+
 impl QueryBackend {
     /// Create a new query backend
     pub fn new() -> Self {
@@ -815,20 +895,7 @@ impl QueryBackend {
 
             // Handle RETURNING clause
             if let Some(returning) = &insert.returning {
-                // For RETURNING *, return the new batch
-                let should_return_all = returning
-                    .iter()
-                    .any(|item| matches!(item, query_parser::SelectItem::Wildcard));
-
-                if should_return_all {
-                    let field_info = crate::result::schema_to_field_info(&inserted_batch.schema());
-                    let rows = crate::result::record_batch_to_rows(&inserted_batch, &field_info)?;
-                    let all_rows: Vec<_> = rows.into_iter().map(|r| r.finish()).collect();
-                    return Ok(Response::Query(pgwire::api::results::QueryResponse::new(
-                        Arc::new(field_info),
-                        futures::stream::iter(all_rows),
-                    )));
-                }
+                return build_returning_response(&inserted_batch, returning);
             }
 
             Ok(Response::Execution(pgwire::api::results::Tag::new(
@@ -1098,6 +1165,13 @@ impl QueryBackend {
                 new_batches.push(new_batch);
             }
 
+            // Save batches for RETURNING before move
+            let return_batch = if !new_batches.is_empty() {
+                Some(new_batches[0].clone())
+            } else {
+                None
+            };
+
             // Create new data source with updated data
             let new_source = Arc::new(MemoryDataSource::new(schema.clone(), new_batches));
 
@@ -1106,7 +1180,7 @@ impl QueryBackend {
             tables.insert(
                 table_name.clone(),
                 TableEntry {
-                    schema,
+                    schema: schema.clone(),
                     source: new_source,
                 },
             );
@@ -1114,6 +1188,14 @@ impl QueryBackend {
             // Adjust count (updated_rows counts each column update, divide by assignments)
             let actual_rows = updated_rows / update.assignments.len().max(1);
             info!("Updated {} rows in {}", actual_rows, table_name);
+
+            // Handle RETURNING clause
+            if let Some(returning) = &update.returning {
+                if let Some(batch) = return_batch {
+                    return build_returning_response(&batch, returning);
+                }
+            }
+
             Ok(Response::Execution(pgwire::api::results::Tag::new(
                 &format!("UPDATE {}", actual_rows),
             )))
@@ -1178,6 +1260,7 @@ impl QueryBackend {
             let condition = delete.selection.as_ref().unwrap();
             let mut deleted_rows = 0;
             let mut new_batches = Vec::new();
+            let mut deleted_batches: Vec<RecordBatch> = Vec::new(); // For RETURNING
 
             for batch in existing_batches {
                 let num_rows = batch.num_rows();
@@ -1278,12 +1361,21 @@ impl QueryBackend {
             tables.insert(
                 table_name.clone(),
                 TableEntry {
-                    schema,
+                    schema: schema.clone(),
                     source: new_source,
                 },
             );
 
             info!("Deleted {} rows from {}", deleted_rows, table_name);
+
+            // Handle RETURNING clause - for DELETE we'd need to capture deleted rows
+            // For now, if RETURNING is present, we return count (simplified)
+            if let Some(returning) = &delete.returning {
+                if !deleted_batches.is_empty() {
+                    return build_returning_response(&deleted_batches[0], returning);
+                }
+            }
+
             Ok(Response::Execution(pgwire::api::results::Tag::new(
                 &format!("DELETE {}", deleted_rows),
             )))

@@ -487,6 +487,23 @@ impl Parser {
     fn parse_select_statement(&mut self) -> Result<SelectStatement> {
         self.expect_token(&Token::Select)?;
 
+        // Parse optional DISTINCT ON (col1, col2, ...)
+        let distinct_on = if self.match_token(&Token::Distinct) {
+            if self.match_token(&Token::On) {
+                // DISTINCT ON (columns)
+                self.expect_token(&Token::LeftParen)?;
+                let columns = self.parse_expr_list()?;
+                self.expect_token(&Token::RightParen)?;
+                Some(columns)
+            } else {
+                // Regular DISTINCT - store as empty vec to indicate DISTINCT was present
+                // but no specific columns (handled as regular DISTINCT in execution)
+                Some(vec![])
+            }
+        } else {
+            None
+        };
+
         let projection = self.parse_projection()?;
 
         let from = if self.match_token(&Token::From) {
@@ -556,6 +573,7 @@ impl Parser {
         };
 
         Ok(SelectStatement {
+            distinct_on,
             projection,
             from,
             joins,

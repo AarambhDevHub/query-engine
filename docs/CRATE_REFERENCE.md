@@ -512,8 +512,27 @@ while let Some(batch) = stream.next_batch().await {
 ### Key Types
 
 ```rust
-use query_pgwire::{PgServer, QueryBackend, QueryServerHandlers};
+use query_pgwire::{
+    PgServer, QueryBackend, QueryServerHandlers,
+    AuthConfig, AuthMethod,  // Authentication
+    CursorManager,           // Server-side cursors
+    PortalStore,             // Named portals
+};
 ```
+
+### Modules
+
+| Module | Purpose |
+|--------|---------|
+| `auth` | MD5 and SCRAM-SHA-256 authentication |
+| `backend` | Query processing and command handlers |
+| `catalog` | pg_catalog virtual tables |
+| `cursor` | DECLARE/FETCH/CLOSE cursor support |
+| `extended` | Extended query protocol (prepared statements) |
+| `portal` | Named portal storage for result pagination |
+| `result` | Arrow to PostgreSQL type conversion |
+| `server` | PgServer main entry point |
+| `tls` | TLS/SSL encryption |
 
 #### PgServer
 
@@ -527,6 +546,21 @@ server.load_csv("data/orders.csv", "orders").await?;
 
 // Start listening
 server.start().await?;
+```
+
+#### Authentication
+
+```rust
+// MD5 (default)
+let auth = AuthConfig::new().add_user("admin", "secret");
+
+// SCRAM-SHA-256 (more secure)
+let auth = AuthConfig::new()
+    .add_user("admin", "secret")
+    .with_method(AuthMethod::ScramSha256);
+
+let server = PgServer::new("0.0.0.0", 5432)
+    .with_auth_config(auth);
 ```
 
 #### Connect with Clients

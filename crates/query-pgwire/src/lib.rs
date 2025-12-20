@@ -56,13 +56,16 @@
 
 pub mod auth;
 pub mod backend;
+pub mod catalog;
+pub mod cursor;
 pub mod extended;
+pub mod portal;
 pub mod result;
 pub mod server;
 pub mod tls;
 
 // Authentication exports
-pub use auth::AuthConfig;
+pub use auth::{AuthConfig, AuthMethod};
 
 // Backend exports
 pub use backend::{AuthQueryServerHandlers, QueryBackend, QueryServerHandlers};

@@ -12,6 +12,7 @@
 //! - Statement caching
 
 use crate::backend::TableEntry;
+use crate::portal::PortalStore;
 use crate::result::{record_batch_to_rows, schema_to_field_info};
 use async_trait::async_trait;
 use pgwire::api::portal::Portal;
@@ -38,6 +39,8 @@ pub struct QueryExtendedHandler {
     tables: Arc<RwLock<HashMap<String, TableEntry>>>,
     /// Query parser for prepared statements
     query_parser: Arc<NoopQueryParser>,
+    /// Portal storage for named portals
+    portal_store: PortalStore,
 }
 
 impl QueryExtendedHandler {
@@ -46,6 +49,7 @@ impl QueryExtendedHandler {
         Self {
             tables,
             query_parser: Arc::new(NoopQueryParser::new()),
+            portal_store: PortalStore::new(),
         }
     }
 

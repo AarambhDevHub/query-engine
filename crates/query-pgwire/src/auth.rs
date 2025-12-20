@@ -1,8 +1,8 @@
 //! Authentication support for PostgreSQL wire protocol
 //!
-//! This module provides MD5 password authentication for PostgreSQL clients.
+//! This module provides MD5 and SCRAM-SHA-256 password authentication.
 //!
-//! # Example
+//! # Example - MD5 Authentication
 //!
 //! ```no_run
 //! use query_pgwire::{PgServer, AuthConfig};
@@ -19,13 +19,42 @@
 //!     Ok(())
 //! }
 //! ```
+//!
+//! # Example - SCRAM-SHA-256 Authentication
+//!
+//! ```no_run
+//! use query_pgwire::{PgServer, AuthConfig, AuthMethod};
+//!
+//! #[tokio::main]
+//! async fn main() -> anyhow::Result<()> {
+//!     let auth = AuthConfig::new()
+//!         .add_user("admin", "secret123")
+//!         .with_method(AuthMethod::ScramSha256);
+//!
+//!     let server = PgServer::new("0.0.0.0", 5432)
+//!         .with_auth_config(auth);
+//!     server.start().await?;
+//!     Ok(())
+//! }
+//! ```
 
 use async_trait::async_trait;
 use pgwire::api::auth::md5pass::{Md5PasswordAuthStartupHandler, hash_md5_password};
+use pgwire::api::auth::scram::SASLScramAuthStartupHandler;
 use pgwire::api::auth::{AuthSource, DefaultServerParameterProvider, LoginInfo, Password};
 use pgwire::error::PgWireResult;
 use std::collections::HashMap;
 use std::sync::Arc;
+
+/// Authentication method to use
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AuthMethod {
+    /// MD5 password authentication (legacy, default)
+    #[default]
+    Md5,
+    /// SCRAM-SHA-256 authentication (more secure)
+    ScramSha256,
+}
 
 /// Configuration for PostgreSQL authentication
 #[derive(Debug, Clone)]
@@ -34,6 +63,8 @@ pub struct AuthConfig {
     users: HashMap<String, String>,
     /// Whether authentication is enabled
     enabled: bool,
+    /// Authentication method
+    method: AuthMethod,
 }
 
 impl Default for AuthConfig {
@@ -48,6 +79,7 @@ impl AuthConfig {
         Self {
             users: HashMap::new(),
             enabled: true,
+            method: AuthMethod::Md5,
         }
     }
 
@@ -56,6 +88,17 @@ impl AuthConfig {
         self.users
             .insert(username.to_string(), password.to_string());
         self
+    }
+
+    /// Set the authentication method
+    pub fn with_method(mut self, method: AuthMethod) -> Self {
+        self.method = method;
+        self
+    }
+
+    /// Get the authentication method
+    pub fn method(&self) -> AuthMethod {
+        self.method
     }
 
     /// Check if a user exists
@@ -81,7 +124,7 @@ impl AuthConfig {
 }
 
 /// Authentication source that validates credentials against AuthConfig
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct QueryAuthSource {
     config: AuthConfig,
 }
@@ -97,7 +140,6 @@ impl QueryAuthSource {
 impl AuthSource for QueryAuthSource {
     async fn get_password(&self, login_info: &LoginInfo) -> PgWireResult<Password> {
         // Get the username from login info
-        // Must bind to a local variable to extend lifetime
         let user_option = login_info.user();
         let username = user_option.as_deref().unwrap_or("");
 
@@ -126,6 +168,44 @@ pub fn create_md5_auth_handler(
     let parameter_provider = Arc::new(DefaultServerParameterProvider::default());
 
     Md5PasswordAuthStartupHandler::new(auth_source, parameter_provider)
+}
+
+/// SCRAM-SHA-256 authentication source - returns cleartext password
+#[derive(Debug, Clone)]
+pub struct ScramAuthSource {
+    config: AuthConfig,
+}
+
+impl ScramAuthSource {
+    /// Create a new SCRAM auth source
+    pub fn new(config: AuthConfig) -> Self {
+        Self { config }
+    }
+}
+
+#[async_trait]
+impl AuthSource for ScramAuthSource {
+    async fn get_password(&self, login_info: &LoginInfo) -> PgWireResult<Password> {
+        let username = login_info.user().unwrap_or("");
+        let password = self
+            .config
+            .get_password(username)
+            .unwrap_or("invalid_password");
+
+        // For SCRAM, return cleartext password (no salt)
+        // The SASLScramAuthStartupHandler will handle hashing
+        Ok(Password::new(None, password.as_bytes().to_vec()))
+    }
+}
+
+/// Create a SCRAM-SHA-256 authentication startup handler
+pub fn create_scram_auth_handler(
+    config: AuthConfig,
+) -> SASLScramAuthStartupHandler<ScramAuthSource, DefaultServerParameterProvider> {
+    let auth_source = Arc::new(ScramAuthSource::new(config));
+    let parameter_provider = Arc::new(DefaultServerParameterProvider::default());
+
+    SASLScramAuthStartupHandler::new(auth_source, parameter_provider)
 }
 
 #[cfg(test)]
@@ -160,5 +240,14 @@ mod tests {
             .add_user("admin", "pass")
             .set_enabled(false);
         assert!(!config.is_enabled());
+    }
+
+    #[test]
+    fn test_auth_method() {
+        let config = AuthConfig::new();
+        assert_eq!(config.method(), AuthMethod::Md5);
+
+        let config = AuthConfig::new().with_method(AuthMethod::ScramSha256);
+        assert_eq!(config.method(), AuthMethod::ScramSha256);
     }
 }

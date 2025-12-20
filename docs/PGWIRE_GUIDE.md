@@ -198,20 +198,122 @@ Current limitations and planned future improvements:
 | INSERT | Insert rows with multi-row VALUES support |
 | UPDATE | Update column values with WHERE clause filtering |
 | DELETE | Delete rows with WHERE clause filtering |
+| System Catalogs | `pg_catalog.pg_tables`, `pg_attribute`, `pg_type`, and `information_schema.columns` |
+| COPY Command | `COPY table TO STDOUT` and `COPY table FROM STDIN` with CSV format |
+| Server-Side Cursors | DECLARE, FETCH, CLOSE cursor commands |
+| SCRAM-SHA-256 | More secure authentication (use `.with_method(AuthMethod::ScramSha256)`) |
+| Named Portals | Result pagination via extended protocol |
 
 ### Not Yet Implemented
 
-| Feature | Priority | Description |
-|---------|----------|-------------|
-| System Catalogs | Low | `pg_catalog` tables for introspection |
-| COPY Command | Low | Bulk data import/export |
-| Cursors | Low | Server-side cursor support |
-| SCRAM-SHA-256 | Low | More secure authentication (currently MD5) |
+The following PostgreSQL features are **not supported** in this implementation:
 
-### Current Workarounds
+| Category | Feature | Notes |
+|----------|---------|-------|
+| **Data Types** | ARRAY types | Arrays not supported |
+| | JSON/JSONB | Use TEXT with application-level parsing |
+| | UUID | Use TEXT format |
+| | NUMERIC/DECIMAL | Use FLOAT64 |
+| | BYTEA | Binary data partially supported |
+| | Interval | Time intervals not implemented |
+| | Geometric types | POINT, LINE, etc. not supported |
+| | ENUM types | Not supported |
+| **Query Features** | RETURNING clause | INSERT/UPDATE/DELETE don't return rows |
+| | UPSERT (ON CONFLICT) | Not implemented |
+| | Recursive CTEs | WITH RECURSIVE not supported |
+| | DISTINCT ON | Only standard DISTINCT |
+| | FULL TEXT SEARCH | No tsvector/tsquery |
+| **Transactions** | SAVEPOINT | Only BEGIN/COMMIT/ROLLBACK |
+| | Nested transactions | Not supported |
+| | Isolation levels | Single-connection only |
+| | Two-phase commit (PREPARE TRANSACTION) | Not implemented |
+| **Schema** | ALTER TABLE | Cannot modify existing tables |
+| | DROP TABLE | Tables persist until server restart |
+| | Foreign keys | No referential integrity |
+| | CHECK constraints | Not enforced |
+| | DEFAULT values | Not supported in CREATE TABLE |
+| | Sequences/SERIAL | Use explicit INT64 |
+| | Views | CREATE VIEW not supported |
+| | Materialized Views | Not supported |
+| **Server Features** | Multiple databases | Single database per server |
+| | Roles/permissions | No GRANT/REVOKE |
+| | LISTEN/NOTIFY | No pub/sub |
+| | Large Objects | Not supported |
+| | Server-side functions | No CREATE FUNCTION/PL/pgSQL |
+| | Triggers | Not supported |
+| | Rules | Not supported |
+| **Replication** | Logical replication | Not supported |
+| | Physical replication | Not supported |
 
-- **No COPY**: Use `--load` flag or `register_table()` API
-- **No System Catalogs**: Use `SHOW TABLES` and `DESCRIBE table`
+> [!NOTE]
+> This is an in-memory query engine focused on analytics. Window functions (ROW_NUMBER, RANK, etc.), CTEs (WITH clause), and JOINs are fully supported. Use PostgreSQL for full RDBMS features.
+
+### System Catalogs
+
+Query metadata about registered tables:
+
+```sql
+-- List all tables
+SELECT * FROM pg_catalog.pg_tables;
+
+-- Get column information
+SELECT * FROM pg_catalog.pg_attribute WHERE tablename = 'users';
+
+-- List data types
+SELECT * FROM pg_catalog.pg_type;
+
+-- Using information_schema (PostgreSQL standard)
+SELECT * FROM information_schema.columns WHERE table_name = 'users';
+```
+
+### COPY Command
+
+Export and import table data in CSV format:
+
+```sql
+-- Export all data as CSV
+COPY users TO STDOUT;
+
+-- Export with header row
+COPY users TO STDOUT WITH (HEADER);
+
+-- Import data from CSV (inline data format)
+COPY users FROM STDIN;
+1,Alice,25
+2,Bob,30
+\.
+
+-- Import with header (skips first line)
+COPY users FROM STDIN WITH (HEADER);
+id,name,age
+1,Alice,25
+2,Bob,30
+\.
+\.
+```
+
+### Server-Side Cursors
+
+Paginate through large result sets:
+
+```sql
+-- Must be in a transaction
+BEGIN;
+
+-- Declare a cursor
+DECLARE my_cursor CURSOR FOR SELECT * FROM users WHERE age > 21;
+
+-- Fetch rows in batches
+FETCH 10 FROM my_cursor;
+FETCH 10 FROM my_cursor;
+
+-- Fetch all remaining
+FETCH ALL FROM my_cursor;
+
+-- Close when done
+CLOSE my_cursor;
+COMMIT;
+```
 
 ### Special Commands
 

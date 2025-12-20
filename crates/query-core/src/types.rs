@@ -16,10 +16,27 @@ pub enum DataType {
     Float64,
     Utf8,
     Binary,
+    LargeBinary,
     Date32,
     Date64,
     Timestamp,
     Null,
+    // PostgreSQL-compatible types
+    Uuid,                                    // UUID (stored as FixedSizeBinary(16))
+    Decimal128 { precision: u8, scale: i8 }, // NUMERIC/DECIMAL
+    Interval,                                // Time interval
+    Json,                                    // JSON/JSONB (stored as Utf8)
+    List(Box<DataType>),                     // ARRAY types
+    // Geometric types (stored as Utf8/text representation)
+    Point,       // (x, y) coordinate
+    Line,        // Infinite line {A,B,C}
+    LineSegment, // Line segment [(x1,y1),(x2,y2)]
+    Box,         // Rectangle ((x1,y1),(x2,y2))
+    Path,        // Path [(x1,y1),...]
+    Polygon,     // Polygon ((x1,y1),...)
+    Circle,      // Circle <(x,y),r>
+    // Enum type
+    Enum { name: String, values: Vec<String> }, // User-defined enum
 }
 
 impl DataType {
@@ -38,12 +55,35 @@ impl DataType {
             DataType::Float64 => ArrowDataType::Float64,
             DataType::Utf8 => ArrowDataType::Utf8,
             DataType::Binary => ArrowDataType::Binary,
+            DataType::LargeBinary => ArrowDataType::LargeBinary,
             DataType::Date32 => ArrowDataType::Date32,
             DataType::Date64 => ArrowDataType::Date64,
             DataType::Timestamp => {
                 ArrowDataType::Timestamp(arrow::datatypes::TimeUnit::Microsecond, None)
             }
             DataType::Null => ArrowDataType::Null,
+            // New types
+            DataType::Uuid => ArrowDataType::FixedSizeBinary(16),
+            DataType::Decimal128 { precision, scale } => {
+                ArrowDataType::Decimal128(*precision, *scale)
+            }
+            DataType::Interval => {
+                ArrowDataType::Interval(arrow::datatypes::IntervalUnit::MonthDayNano)
+            }
+            DataType::Json => ArrowDataType::Utf8, // JSON stored as text
+            DataType::List(inner) => ArrowDataType::List(std::sync::Arc::new(
+                arrow::datatypes::Field::new("item", inner.to_arrow(), true),
+            )),
+            // Geometric types stored as text
+            DataType::Point
+            | DataType::Line
+            | DataType::LineSegment
+            | DataType::Box
+            | DataType::Path
+            | DataType::Polygon
+            | DataType::Circle => ArrowDataType::Utf8,
+            // Enum stored as text
+            DataType::Enum { .. } => ArrowDataType::Utf8,
         }
     }
 
@@ -61,10 +101,21 @@ impl DataType {
             ArrowDataType::Float32 => DataType::Float32,
             ArrowDataType::Float64 => DataType::Float64,
             ArrowDataType::Utf8 | ArrowDataType::LargeUtf8 => DataType::Utf8,
-            ArrowDataType::Binary | ArrowDataType::LargeBinary => DataType::Binary,
+            ArrowDataType::Binary => DataType::Binary,
+            ArrowDataType::LargeBinary => DataType::LargeBinary,
             ArrowDataType::Date32 => DataType::Date32,
             ArrowDataType::Date64 => DataType::Date64,
             ArrowDataType::Timestamp(_, _) => DataType::Timestamp,
+            // New types
+            ArrowDataType::FixedSizeBinary(16) => DataType::Uuid,
+            ArrowDataType::Decimal128(p, s) => DataType::Decimal128 {
+                precision: *p,
+                scale: *s,
+            },
+            ArrowDataType::Interval(_) => DataType::Interval,
+            ArrowDataType::List(field) => {
+                DataType::List(Box::new(DataType::from_arrow(field.data_type())))
+            }
             _ => DataType::Null,
         }
     }

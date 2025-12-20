@@ -113,6 +113,8 @@ pub enum Token {
     // Delimiters
     LeftParen,
     RightParen,
+    LeftBracket,
+    RightBracket,
     Comma,
     Dot,
     Semicolon,
@@ -238,6 +240,14 @@ impl Lexer {
             ';' => {
                 self.advance();
                 Token::Semicolon
+            }
+            '[' => {
+                self.advance();
+                Token::LeftBracket
+            }
+            ']' => {
+                self.advance();
+                Token::RightBracket
             }
             '\'' | '"' => self.read_string()?,
             _ if ch.is_ascii_digit() => self.read_number()?,

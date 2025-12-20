@@ -29,11 +29,96 @@ Complete reference for data types supported by Query Engine.
 | `FLOAT32` / `REAL` | 4 bytes | ~7 digits | Scientific data |
 | `FLOAT64` / `DOUBLE` | 8 bytes | ~15 digits | Financial, high precision |
 
-### Decimal (Future)
+### Decimal/Numeric
 
 For exact decimal arithmetic:
 ```sql
 DECIMAL(precision, scale)  -- e.g., DECIMAL(10, 2) for currency
+NUMERIC(10, 2)             -- Same as DECIMAL
+```
+
+| Syntax | Example |
+|--------|---------|
+| `DECIMAL(p, s)` | `DECIMAL(10, 2)` for money |
+| `NUMERIC` | Default precision (38, 9) |
+
+## UUID Type
+
+| Type | Size | Description |
+|------|------|-------------|
+| `UUID` | 16 bytes | Universally Unique Identifier |
+
+```sql
+CREATE TABLE users (
+    id UUID NOT NULL,
+    name VARCHAR
+);
+```
+
+## JSON Type
+
+| Type | Storage | Description |
+|------|---------|-------------|
+| `JSON` | Text | JSON document storage |
+| `JSONB` | Text | Same as JSON |
+
+```sql
+CREATE TABLE events (
+    id BIGINT,
+    data JSON
+);
+```
+
+## Array Types
+
+Arrays of any base type using `[]` suffix:
+
+| Syntax | Description |
+|--------|-------------|
+| `INT[]` | Array of integers |
+| `TEXT[]` | Array of strings |
+| `UUID[]` | Array of UUIDs |
+
+```sql
+CREATE TABLE products (
+    id BIGINT,
+    tags TEXT[],
+    prices DECIMAL(10,2)[]
+);
+```
+
+## Geometric Types
+
+| Type | Format | Description |
+|------|--------|-------------|
+| `POINT` | `(x, y)` | 2D coordinate |
+| `LINE` | `{A,B,C}` | Infinite line |
+| `LSEG` | `[(x1,y1),(x2,y2)]` | Line segment |
+| `BOX` | `((x1,y1),(x2,y2))` | Rectangle |
+| `PATH` | `[(x1,y1),...]` | Connected points |
+| `POLYGON` | `((x1,y1),...)` | Closed polygon |
+| `CIRCLE` | `<(x,y),r>` | Circle |
+
+```sql
+CREATE TABLE locations (
+    id BIGINT,
+    coords POINT,
+    area POLYGON,
+    boundary BOX
+);
+```
+
+## Interval Type
+
+| Type | Storage | Description |
+|------|---------|-------------|
+| `INTERVAL` | MonthDayNano | Time duration |
+
+```sql
+CREATE TABLE tasks (
+    id BIGINT,
+    duration INTERVAL
+);
 ```
 
 ## String Types

@@ -46,7 +46,22 @@ DROP INDEX [IF EXISTS] index_name [ON table_name];
 
 ```sql
 INSERT INTO table_name (column, ...)
-VALUES (value, ...), ...;
+VALUES (value, ...), ...
+[ON CONFLICT (column, ...) DO NOTHING | DO UPDATE SET col = value, ...];
+```
+
+#### UPSERT (ON CONFLICT)
+
+Handle unique constraint violations:
+
+```sql
+-- Skip on conflict
+INSERT INTO users (id, name) VALUES (1, 'Alice')
+ON CONFLICT (id) DO NOTHING;
+
+-- Update on conflict
+INSERT INTO users (id, name) VALUES (1, 'Bob')
+ON CONFLICT (id) DO UPDATE SET name = 'Bob';
 ```
 
 ### UPDATE
@@ -263,6 +278,21 @@ WHERE sub.total > 1000;
 ```sql
 WITH cte_name AS (
     SELECT ...
+)
+SELECT * FROM cte_name;
+```
+
+### Recursive CTEs
+
+Recursive queries with fixed-point iteration:
+
+```sql
+WITH RECURSIVE cte_name AS (
+    -- Base case (non-recursive term)
+    SELECT 1 AS n
+    UNION ALL
+    -- Recursive term (references cte_name)
+    SELECT n + 1 FROM cte_name WHERE n < 10
 )
 SELECT * FROM cte_name;
 ```

@@ -32,6 +32,7 @@ pub struct QueryBackend {
     cursors: CursorManager,
 }
 
+#[derive(Clone)]
 pub struct TableEntry {
     pub schema: Schema,
     pub source: Arc<MemoryDataSource>,
@@ -160,9 +161,23 @@ impl QueryBackend {
         sql: &str,
         tables: HashMap<String, TableEntry>,
     ) -> Result<Vec<arrow::record_batch::RecordBatch>, String> {
+        use arrow::compute::concat_batches;
+        use query_parser::{SetOperation, Statement};
+
         // Parse SQL
         let mut parser = Parser::new(sql).map_err(|e| format!("Parse error: {}", e))?;
         let statement = parser.parse().map_err(|e| format!("Parse error: {}", e))?;
+
+        // Check for recursive CTE
+        if let Statement::WithSelect {
+            ref with,
+            ref select,
+        } = statement
+        {
+            if with.recursive && !with.ctes.is_empty() {
+                return Self::execute_recursive_cte_sync(&with.ctes[0], select, tables);
+            }
+        }
 
         // Create planner and register tables
         let mut planner = Planner::new();
@@ -200,6 +215,330 @@ impl QueryBackend {
         let rt = tokio::runtime::Handle::current();
         rt.block_on(async { executor.execute(&physical_plan).await })
             .map_err(|e| format!("Execution error: {}", e))
+    }
+
+    /// Execute a recursive CTE with fixed-point iteration
+    fn execute_recursive_cte_sync(
+        cte: &query_parser::CteDefinition,
+        main_select: &query_parser::SelectStatement,
+        mut tables: HashMap<String, TableEntry>,
+    ) -> Result<Vec<arrow::record_batch::RecordBatch>, String> {
+        use arrow::compute::concat_batches;
+        use query_parser::SetOperation;
+
+        let cte_name = &cte.name;
+        let cte_query = &cte.query;
+
+        // Check if the CTE has a UNION clause (required for recursion)
+        if cte_query.union_clause.is_none() {
+            return Err("Recursive CTE must have UNION or UNION ALL".to_string());
+        }
+
+        let union_clause = cte_query.union_clause.as_ref().unwrap();
+
+        // Base query is the left part (before UNION ALL)
+        // Recursive query is the right part (after UNION ALL)
+        let base_select = query_parser::SelectStatement {
+            projection: cte_query.projection.clone(),
+            from: cte_query.from.clone(),
+            joins: cte_query.joins.clone(),
+            selection: cte_query.selection.clone(),
+            group_by: cte_query.group_by.clone(),
+            having: cte_query.having.clone(),
+            order_by: vec![],
+            limit: None,
+            offset: None,
+            union_clause: None,
+        };
+
+        // Execute base query
+        let base_sql = format!(
+            "SELECT {} {}",
+            Self::projection_to_sql(&base_select.projection),
+            Self::from_to_sql(&base_select.from, &base_select.selection)
+        );
+
+        // For a simple recursive CTE like SELECT 1 AS n, we handle it directly
+        let mut working_table: Vec<arrow::record_batch::RecordBatch> = Vec::new();
+
+        // Check if base query is a simple literal (SELECT 1 AS n)
+        if base_select.from.is_none() && base_select.projection.len() == 1 {
+            // Simple literal base case
+            if let Some(batch) = Self::execute_literal_select(&base_select) {
+                working_table.push(batch);
+            }
+        } else {
+            // Execute base query through normal path
+            let base_result = Self::execute_query_sync(&base_sql, tables.clone())?;
+            working_table.extend(base_result);
+        }
+
+        if working_table.is_empty() {
+            return Err("Recursive CTE base query returned no rows".to_string());
+        }
+
+        // Get schema from first batch
+        let schema = working_table[0].schema();
+
+        // Register CTE as a temporary table for recursive queries
+        let cte_source = Arc::new(MemoryDataSource::new(
+            query_core::Schema::from_arrow(&schema),
+            working_table.clone(),
+        ));
+        let cte_entry = TableEntry {
+            schema: query_core::Schema::from_arrow(&schema),
+            source: cte_source,
+        };
+        tables.insert(cte_name.clone(), cte_entry);
+
+        // Fixed-point iteration
+        let max_iterations = 1000; // Safety limit
+        let mut iteration = 0;
+        let mut all_results: Vec<arrow::record_batch::RecordBatch> = working_table.clone();
+
+        loop {
+            iteration += 1;
+            if iteration > max_iterations {
+                return Err(format!(
+                    "Recursive CTE exceeded {} iterations",
+                    max_iterations
+                ));
+            }
+
+            // Build recursive query SQL
+            let recursive_select = &union_clause.select;
+            let recursive_sql = format!(
+                "SELECT {} {}",
+                Self::projection_to_sql(&recursive_select.projection),
+                Self::from_to_sql(&recursive_select.from, &recursive_select.selection)
+            );
+
+            // Update CTE table with current working table
+            let cte_source = Arc::new(MemoryDataSource::new(
+                query_core::Schema::from_arrow(&schema),
+                working_table.clone(),
+            ));
+            tables.insert(
+                cte_name.clone(),
+                TableEntry {
+                    schema: query_core::Schema::from_arrow(&schema),
+                    source: cte_source,
+                },
+            );
+
+            // Execute recursive query
+            let new_rows = Self::execute_simple_query_sync(&recursive_sql, &tables)?;
+
+            if new_rows.is_empty() {
+                // Fixed point reached - no new rows
+                break;
+            }
+
+            let new_row_count: usize = new_rows.iter().map(|b| b.num_rows()).sum();
+            if new_row_count == 0 {
+                break;
+            }
+
+            // Add new rows to results
+            all_results.extend(new_rows.clone());
+            working_table = new_rows;
+        }
+
+        // Now execute the main SELECT against the complete CTE result
+        let final_cte_source = Arc::new(MemoryDataSource::new(
+            query_core::Schema::from_arrow(&schema),
+            all_results.clone(),
+        ));
+        tables.insert(
+            cte_name.clone(),
+            TableEntry {
+                schema: query_core::Schema::from_arrow(&schema),
+                source: final_cte_source,
+            },
+        );
+
+        // Execute main select
+        let main_sql = format!(
+            "SELECT {} {}",
+            Self::projection_to_sql(&main_select.projection),
+            Self::from_to_sql(&main_select.from, &main_select.selection)
+        );
+
+        Self::execute_simple_query_sync(&main_sql, &tables)
+    }
+
+    /// Execute a simple query without recursive CTE handling
+    fn execute_simple_query_sync(
+        sql: &str,
+        tables: &HashMap<String, TableEntry>,
+    ) -> Result<Vec<arrow::record_batch::RecordBatch>, String> {
+        let mut parser = Parser::new(sql).map_err(|e| format!("Parse error: {}", e))?;
+        let statement = parser.parse().map_err(|e| format!("Parse error: {}", e))?;
+
+        let mut planner = Planner::new();
+        for (name, entry) in tables.iter() {
+            planner.register_table(name, entry.schema.clone());
+        }
+
+        let data_sources: HashMap<String, Arc<dyn DataSource>> = tables
+            .iter()
+            .map(|(name, entry)| {
+                (
+                    name.clone(),
+                    Arc::clone(&entry.source) as Arc<dyn DataSource>,
+                )
+            })
+            .collect();
+
+        let logical_plan = planner
+            .create_logical_plan(&statement)
+            .map_err(|e| format!("Planning error: {}", e))?;
+
+        let optimizer = Optimizer::new();
+        let optimized_plan = optimizer
+            .optimize(&logical_plan)
+            .map_err(|e| format!("Optimization error: {}", e))?;
+
+        let physical_plan = logical_to_physical_plan(&optimized_plan, &data_sources)?;
+
+        let executor = QueryExecutor::new();
+        let rt = tokio::runtime::Handle::current();
+        rt.block_on(async { executor.execute(&physical_plan).await })
+            .map_err(|e| format!("Execution error: {}", e))
+    }
+
+    /// Helper: Convert projection to SQL string
+    fn projection_to_sql(projection: &[query_parser::SelectItem]) -> String {
+        projection
+            .iter()
+            .map(|item| match item {
+                query_parser::SelectItem::Wildcard => "*".to_string(),
+                query_parser::SelectItem::QualifiedWildcard(t) => format!("{}.*", t),
+                query_parser::SelectItem::UnnamedExpr(e) => Self::expr_to_sql(e),
+                query_parser::SelectItem::ExprWithAlias { expr, alias } => {
+                    format!("{} AS {}", Self::expr_to_sql(expr), alias)
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
+    /// Helper: Convert FROM clause to SQL string
+    fn from_to_sql(
+        from: &Option<query_parser::TableReference>,
+        selection: &Option<query_parser::Expr>,
+    ) -> String {
+        let from_sql = match from {
+            Some(query_parser::TableReference::Table { name, alias }) => match alias {
+                Some(a) => format!("FROM {} AS {}", name, a),
+                None => format!("FROM {}", name),
+            },
+            Some(query_parser::TableReference::Subquery { .. }) => String::new(),
+            None => String::new(),
+        };
+
+        let where_sql = match selection {
+            Some(expr) => format!(" WHERE {}", Self::expr_to_sql(expr)),
+            None => String::new(),
+        };
+
+        format!("{}{}", from_sql, where_sql)
+    }
+
+    /// Helper: Convert expression to SQL string
+    fn expr_to_sql(expr: &query_parser::Expr) -> String {
+        match expr {
+            query_parser::Expr::Column(name) => name.clone(),
+            query_parser::Expr::QualifiedColumn { table, column } => {
+                format!("{}.{}", table, column)
+            }
+            query_parser::Expr::Literal(lit) => match lit {
+                query_parser::Literal::Number(n) => n.clone(),
+                query_parser::Literal::String(s) => format!("'{}'", s),
+                query_parser::Literal::Boolean(b) => b.to_string(),
+                query_parser::Literal::Null => "NULL".to_string(),
+            },
+            query_parser::Expr::BinaryOp { left, op, right } => {
+                let op_str = match op {
+                    query_parser::BinaryOperator::Plus => "+",
+                    query_parser::BinaryOperator::Minus => "-",
+                    query_parser::BinaryOperator::Multiply => "*",
+                    query_parser::BinaryOperator::Divide => "/",
+                    query_parser::BinaryOperator::Equal => "=",
+                    query_parser::BinaryOperator::NotEqual => "<>",
+                    query_parser::BinaryOperator::Less => "<",
+                    query_parser::BinaryOperator::LessEqual => "<=",
+                    query_parser::BinaryOperator::Greater => ">",
+                    query_parser::BinaryOperator::GreaterEqual => ">=",
+                    query_parser::BinaryOperator::And => "AND",
+                    query_parser::BinaryOperator::Or => "OR",
+                    _ => "?",
+                };
+                format!(
+                    "{} {} {}",
+                    Self::expr_to_sql(left),
+                    op_str,
+                    Self::expr_to_sql(right)
+                )
+            }
+            _ => "?".to_string(),
+        }
+    }
+
+    /// Helper: Execute a simple literal SELECT (e.g., SELECT 1 AS n)
+    fn execute_literal_select(
+        select: &query_parser::SelectStatement,
+    ) -> Option<arrow::record_batch::RecordBatch> {
+        use arrow::array::{ArrayRef, Int64Builder, StringBuilder};
+        use arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
+
+        if select.projection.len() != 1 {
+            return None;
+        }
+
+        match &select.projection[0] {
+            query_parser::SelectItem::ExprWithAlias { expr, alias } => match expr {
+                query_parser::Expr::Literal(query_parser::Literal::Number(n)) => {
+                    let val: i64 = n.parse().ok()?;
+                    let schema = Arc::new(ArrowSchema::new(vec![Field::new(
+                        alias,
+                        DataType::Int64,
+                        false,
+                    )]));
+                    let mut builder = Int64Builder::new();
+                    builder.append_value(val);
+                    let array = Arc::new(builder.finish()) as ArrayRef;
+                    arrow::record_batch::RecordBatch::try_new(schema, vec![array]).ok()
+                }
+                query_parser::Expr::Literal(query_parser::Literal::String(s)) => {
+                    let schema = Arc::new(ArrowSchema::new(vec![Field::new(
+                        alias,
+                        DataType::Utf8,
+                        false,
+                    )]));
+                    let mut builder = StringBuilder::new();
+                    builder.append_value(s);
+                    let array = Arc::new(builder.finish()) as ArrayRef;
+                    arrow::record_batch::RecordBatch::try_new(schema, vec![array]).ok()
+                }
+                _ => None,
+            },
+            query_parser::SelectItem::UnnamedExpr(query_parser::Expr::Literal(
+                query_parser::Literal::Number(n),
+            )) => {
+                let val: i64 = n.parse().ok()?;
+                let schema = Arc::new(ArrowSchema::new(vec![Field::new(
+                    "?column?",
+                    DataType::Int64,
+                    false,
+                )]));
+                let mut builder = Int64Builder::new();
+                builder.append_value(val);
+                let array = Arc::new(builder.finish()) as ArrayRef;
+                arrow::record_batch::RecordBatch::try_new(schema, vec![array]).ok()
+            }
+            _ => None,
+        }
     }
 
     /// Execute a SQL query and return results
@@ -748,11 +1087,14 @@ impl QueryBackend {
         }
     }
 
-    /// Handle INSERT command
+    /// Handle INSERT command with ON CONFLICT support
     async fn handle_insert(&self, sql: &str) -> PgWireResult<Response<'static>> {
-        use arrow::array::{ArrayRef, BooleanBuilder, Float64Builder, Int64Builder, StringBuilder};
+        use arrow::array::{
+            ArrayRef, BooleanArray, BooleanBuilder, Float64Array, Float64Builder, Int64Array,
+            Int64Builder, StringArray, StringBuilder,
+        };
         use arrow::record_batch::RecordBatch;
-        use query_parser::Parser;
+        use query_parser::{ConflictAction, Parser};
 
         let mut parser = Parser::new(sql).map_err(|e| user_error(format!("Parse error: {}", e)))?;
         let statement = parser
@@ -761,7 +1103,7 @@ impl QueryBackend {
 
         if let query_parser::Statement::Insert(insert) = statement {
             // Get existing table info and batches
-            let (schema, mut existing_batches, table_name) = {
+            let (schema, existing_batches, table_name) = {
                 let tables = self.tables.read().await;
                 let entry = tables
                     .get(&insert.table)
@@ -775,111 +1117,327 @@ impl QueryBackend {
                 (entry.schema.clone(), batches, insert.table.clone())
             };
 
-            let row_count = insert.values.len();
+            // Get conflict column indices if ON CONFLICT specified
+            let conflict_col_indices: Option<Vec<usize>> = insert.on_conflict.as_ref().map(|oc| {
+                oc.columns
+                    .iter()
+                    .filter_map(|col_name| {
+                        schema.fields().iter().position(|f| f.name() == col_name)
+                    })
+                    .collect()
+            });
 
-            // Build arrays for each column
-            let mut arrays: Vec<ArrayRef> = Vec::new();
-            for (col_idx, field) in schema.fields().iter().enumerate() {
-                match field.data_type() {
-                    query_core::DataType::Int64 => {
-                        let mut builder = Int64Builder::new();
-                        for row in &insert.values {
-                            if col_idx < row.len() {
-                                if let query_parser::Expr::Literal(query_parser::Literal::Number(
-                                    n,
-                                )) = &row[col_idx]
-                                {
-                                    builder.append_value(n.parse::<i64>().unwrap_or(0));
-                                } else {
-                                    builder.append_null();
+            // Track which existing rows have been updated (for DO UPDATE)
+            let mut updated_existing_rows: std::collections::HashSet<(usize, usize)> =
+                std::collections::HashSet::new();
+            let mut rows_to_insert: Vec<usize> = Vec::new(); // indices of values to actually insert
+            let mut inserted_count = 0usize;
+            let mut updated_count = 0usize;
+
+            // For each new row, check for conflicts
+            for (row_idx, row) in insert.values.iter().enumerate() {
+                let mut has_conflict = false;
+
+                if let Some(ref col_indices) = conflict_col_indices {
+                    // Extract conflict key values from new row
+                    let new_key_values: Vec<String> = col_indices
+                        .iter()
+                        .map(|&idx| {
+                            if idx < row.len() {
+                                match &row[idx] {
+                                    query_parser::Expr::Literal(query_parser::Literal::Number(
+                                        n,
+                                    )) => n.clone(),
+                                    query_parser::Expr::Literal(query_parser::Literal::String(
+                                        s,
+                                    )) => s.clone(),
+                                    query_parser::Expr::Literal(
+                                        query_parser::Literal::Boolean(b),
+                                    ) => b.to_string(),
+                                    _ => String::new(),
                                 }
                             } else {
-                                builder.append_null();
+                                String::new()
                             }
-                        }
-                        arrays.push(Arc::new(builder.finish()) as ArrayRef);
-                    }
-                    query_core::DataType::Float64 => {
-                        let mut builder = Float64Builder::new();
-                        for row in &insert.values {
-                            if col_idx < row.len() {
-                                if let query_parser::Expr::Literal(query_parser::Literal::Number(
-                                    n,
-                                )) = &row[col_idx]
-                                {
-                                    builder.append_value(n.parse::<f64>().unwrap_or(0.0));
-                                } else {
-                                    builder.append_null();
+                        })
+                        .collect();
+
+                    // Check existing batches for conflicts
+                    'batch_loop: for (batch_idx, batch) in existing_batches.iter().enumerate() {
+                        for existing_row in 0..batch.num_rows() {
+                            let mut matches = true;
+                            for (key_idx, &col_idx) in col_indices.iter().enumerate() {
+                                let existing_val =
+                                    self.get_value_as_string(batch, col_idx, existing_row);
+                                if existing_val != new_key_values[key_idx] {
+                                    matches = false;
+                                    break;
                                 }
-                            } else {
-                                builder.append_null();
+                            }
+                            if matches {
+                                has_conflict = true;
+                                updated_existing_rows.insert((batch_idx, existing_row));
+                                break 'batch_loop;
                             }
                         }
-                        arrays.push(Arc::new(builder.finish()) as ArrayRef);
                     }
-                    query_core::DataType::Utf8 => {
-                        let mut builder = StringBuilder::new();
-                        for row in &insert.values {
-                            if col_idx < row.len() {
-                                if let query_parser::Expr::Literal(query_parser::Literal::String(
-                                    s,
-                                )) = &row[col_idx]
-                                {
-                                    builder.append_value(s);
-                                } else if let query_parser::Expr::Literal(
-                                    query_parser::Literal::Number(n),
-                                ) = &row[col_idx]
-                                {
-                                    builder.append_value(n);
-                                } else {
-                                    builder.append_null();
-                                }
-                            } else {
-                                builder.append_null();
-                            }
+                }
+
+                if has_conflict {
+                    match insert.on_conflict.as_ref().map(|oc| &oc.action) {
+                        Some(ConflictAction::DoNothing) => {
+                            // Skip this row
                         }
-                        arrays.push(Arc::new(builder.finish()) as ArrayRef);
-                    }
-                    query_core::DataType::Boolean => {
-                        let mut builder = BooleanBuilder::new();
-                        for row in &insert.values {
-                            if col_idx < row.len() {
-                                if let query_parser::Expr::Literal(
-                                    query_parser::Literal::Boolean(b),
-                                ) = &row[col_idx]
-                                {
-                                    builder.append_value(*b);
-                                } else {
-                                    builder.append_null();
-                                }
-                            } else {
-                                builder.append_null();
-                            }
+                        Some(ConflictAction::DoUpdate { .. }) => {
+                            updated_count += 1;
                         }
-                        arrays.push(Arc::new(builder.finish()) as ArrayRef);
-                    }
-                    _ => {
-                        let mut builder = StringBuilder::new();
-                        for _ in &insert.values {
-                            builder.append_null();
+                        None => {
+                            // No ON CONFLICT, should not happen here
+                            rows_to_insert.push(row_idx);
+                            inserted_count += 1;
                         }
-                        arrays.push(Arc::new(builder.finish()) as ArrayRef);
                     }
+                } else {
+                    rows_to_insert.push(row_idx);
+                    inserted_count += 1;
                 }
             }
 
-            let arrow_schema = Arc::new(schema.to_arrow());
-            let new_batch = RecordBatch::try_new(arrow_schema, arrays)
-                .map_err(|e| user_error(format!("Failed to create batch: {}", e)))?;
+            // Build arrays for rows to insert
+            let mut new_batch: Option<RecordBatch> = None;
+            if !rows_to_insert.is_empty() {
+                let mut arrays: Vec<ArrayRef> = Vec::new();
+                for (col_idx, field) in schema.fields().iter().enumerate() {
+                    match field.data_type() {
+                        query_core::DataType::Int64 => {
+                            let mut builder = Int64Builder::new();
+                            for &row_idx in &rows_to_insert {
+                                let row = &insert.values[row_idx];
+                                if col_idx < row.len() {
+                                    if let query_parser::Expr::Literal(
+                                        query_parser::Literal::Number(n),
+                                    ) = &row[col_idx]
+                                    {
+                                        builder.append_value(n.parse::<i64>().unwrap_or(0));
+                                    } else {
+                                        builder.append_null();
+                                    }
+                                } else {
+                                    builder.append_null();
+                                }
+                            }
+                            arrays.push(Arc::new(builder.finish()) as ArrayRef);
+                        }
+                        query_core::DataType::Float64 => {
+                            let mut builder = Float64Builder::new();
+                            for &row_idx in &rows_to_insert {
+                                let row = &insert.values[row_idx];
+                                if col_idx < row.len() {
+                                    if let query_parser::Expr::Literal(
+                                        query_parser::Literal::Number(n),
+                                    ) = &row[col_idx]
+                                    {
+                                        builder.append_value(n.parse::<f64>().unwrap_or(0.0));
+                                    } else {
+                                        builder.append_null();
+                                    }
+                                } else {
+                                    builder.append_null();
+                                }
+                            }
+                            arrays.push(Arc::new(builder.finish()) as ArrayRef);
+                        }
+                        query_core::DataType::Utf8 => {
+                            let mut builder = StringBuilder::new();
+                            for &row_idx in &rows_to_insert {
+                                let row = &insert.values[row_idx];
+                                if col_idx < row.len() {
+                                    if let query_parser::Expr::Literal(
+                                        query_parser::Literal::String(s),
+                                    ) = &row[col_idx]
+                                    {
+                                        builder.append_value(s);
+                                    } else if let query_parser::Expr::Literal(
+                                        query_parser::Literal::Number(n),
+                                    ) = &row[col_idx]
+                                    {
+                                        builder.append_value(n);
+                                    } else {
+                                        builder.append_null();
+                                    }
+                                } else {
+                                    builder.append_null();
+                                }
+                            }
+                            arrays.push(Arc::new(builder.finish()) as ArrayRef);
+                        }
+                        query_core::DataType::Boolean => {
+                            let mut builder = BooleanBuilder::new();
+                            for &row_idx in &rows_to_insert {
+                                let row = &insert.values[row_idx];
+                                if col_idx < row.len() {
+                                    if let query_parser::Expr::Literal(
+                                        query_parser::Literal::Boolean(b),
+                                    ) = &row[col_idx]
+                                    {
+                                        builder.append_value(*b);
+                                    } else {
+                                        builder.append_null();
+                                    }
+                                } else {
+                                    builder.append_null();
+                                }
+                            }
+                            arrays.push(Arc::new(builder.finish()) as ArrayRef);
+                        }
+                        _ => {
+                            let mut builder = StringBuilder::new();
+                            for _ in &rows_to_insert {
+                                builder.append_null();
+                            }
+                            arrays.push(Arc::new(builder.finish()) as ArrayRef);
+                        }
+                    }
+                }
 
-            // Save the batch for RETURNING before adding to existing
-            let inserted_batch = new_batch.clone();
+                if !arrays.is_empty() {
+                    let arrow_schema = Arc::new(schema.to_arrow());
+                    new_batch = Some(
+                        RecordBatch::try_new(arrow_schema, arrays)
+                            .map_err(|e| user_error(format!("Failed to create batch: {}", e)))?,
+                    );
+                }
+            }
 
-            // Add new batch to existing batches
-            existing_batches.push(new_batch);
+            // Handle DO UPDATE: update existing rows that had conflicts
+            let mut final_batches: Vec<RecordBatch> = Vec::new();
+            if let Some(ConflictAction::DoUpdate { assignments }) =
+                insert.on_conflict.as_ref().map(|oc| &oc.action)
+            {
+                // Build assignment map
+                let assignment_map: std::collections::HashMap<String, &query_parser::Expr> =
+                    assignments
+                        .iter()
+                        .map(|a| (a.column.clone(), &a.value))
+                        .collect();
+
+                for (batch_idx, batch) in existing_batches.iter().enumerate() {
+                    let num_rows = batch.num_rows();
+                    let mut arrays: Vec<ArrayRef> = Vec::new();
+
+                    for (col_idx, field) in schema.fields().iter().enumerate() {
+                        let col_name = field.name();
+
+                        if let Some(new_value_expr) = assignment_map.get(col_name) {
+                            let new_value = match new_value_expr {
+                                query_parser::Expr::Literal(query_parser::Literal::Number(n)) => {
+                                    n.clone()
+                                }
+                                query_parser::Expr::Literal(query_parser::Literal::String(s)) => {
+                                    s.clone()
+                                }
+                                query_parser::Expr::Literal(query_parser::Literal::Boolean(b)) => {
+                                    b.to_string()
+                                }
+                                _ => String::new(),
+                            };
+
+                            match field.data_type() {
+                                query_core::DataType::Int64 => {
+                                    let mut builder = Int64Builder::new();
+                                    let orig_arr =
+                                        batch.column(col_idx).as_any().downcast_ref::<Int64Array>();
+                                    let new_val: i64 = new_value.parse().unwrap_or(0);
+                                    for row in 0..num_rows {
+                                        if updated_existing_rows.contains(&(batch_idx, row)) {
+                                            builder.append_value(new_val);
+                                        } else if let Some(arr) = orig_arr {
+                                            builder.append_value(arr.value(row));
+                                        } else {
+                                            builder.append_value(0);
+                                        }
+                                    }
+                                    arrays.push(Arc::new(builder.finish()) as ArrayRef);
+                                }
+                                query_core::DataType::Float64 => {
+                                    let mut builder = Float64Builder::new();
+                                    let orig_arr = batch
+                                        .column(col_idx)
+                                        .as_any()
+                                        .downcast_ref::<Float64Array>();
+                                    let new_val: f64 = new_value.parse().unwrap_or(0.0);
+                                    for row in 0..num_rows {
+                                        if updated_existing_rows.contains(&(batch_idx, row)) {
+                                            builder.append_value(new_val);
+                                        } else if let Some(arr) = orig_arr {
+                                            builder.append_value(arr.value(row));
+                                        } else {
+                                            builder.append_value(0.0);
+                                        }
+                                    }
+                                    arrays.push(Arc::new(builder.finish()) as ArrayRef);
+                                }
+                                query_core::DataType::Utf8 => {
+                                    let mut builder = StringBuilder::new();
+                                    let orig_arr = batch
+                                        .column(col_idx)
+                                        .as_any()
+                                        .downcast_ref::<StringArray>();
+                                    for row in 0..num_rows {
+                                        if updated_existing_rows.contains(&(batch_idx, row)) {
+                                            builder.append_value(&new_value);
+                                        } else if let Some(arr) = orig_arr {
+                                            builder.append_value(arr.value(row));
+                                        } else {
+                                            builder.append_value("");
+                                        }
+                                    }
+                                    arrays.push(Arc::new(builder.finish()) as ArrayRef);
+                                }
+                                query_core::DataType::Boolean => {
+                                    let mut builder = BooleanBuilder::new();
+                                    let orig_arr = batch
+                                        .column(col_idx)
+                                        .as_any()
+                                        .downcast_ref::<BooleanArray>();
+                                    let bool_val = new_value == "true" || new_value == "1";
+                                    for row in 0..num_rows {
+                                        if updated_existing_rows.contains(&(batch_idx, row)) {
+                                            builder.append_value(bool_val);
+                                        } else if let Some(arr) = orig_arr {
+                                            builder.append_value(arr.value(row));
+                                        } else {
+                                            builder.append_value(false);
+                                        }
+                                    }
+                                    arrays.push(Arc::new(builder.finish()) as ArrayRef);
+                                }
+                                _ => {
+                                    arrays.push(Arc::clone(batch.column(col_idx)));
+                                }
+                            }
+                        } else {
+                            arrays.push(Arc::clone(batch.column(col_idx)));
+                        }
+                    }
+
+                    let arrow_schema = Arc::new(schema.to_arrow());
+                    let updated_batch = RecordBatch::try_new(arrow_schema, arrays)
+                        .map_err(|e| user_error(format!("Failed to create batch: {}", e)))?;
+                    final_batches.push(updated_batch);
+                }
+            } else {
+                // No DO UPDATE - keep existing batches as-is
+                final_batches = existing_batches;
+            }
+
+            // Add new batch if any
+            if let Some(batch) = new_batch {
+                final_batches.push(batch);
+            }
 
             // Create new data source with combined data
-            let new_source = Arc::new(MemoryDataSource::new(schema.clone(), existing_batches));
+            let new_source = Arc::new(MemoryDataSource::new(schema.clone(), final_batches));
 
             // Replace the table entry
             let mut tables = self.tables.write().await;
@@ -891,18 +1449,55 @@ impl QueryBackend {
                 },
             );
 
-            info!("Inserted {} rows into {}", row_count, table_name);
+            if updated_count > 0 {
+                info!(
+                    "Upserted {} rows ({} inserted, {} updated) in {}",
+                    inserted_count + updated_count,
+                    inserted_count,
+                    updated_count,
+                    table_name
+                );
+            } else {
+                info!("Inserted {} rows into {}", inserted_count, table_name);
+            }
 
-            // Handle RETURNING clause
-            if let Some(returning) = &insert.returning {
-                return build_returning_response(&inserted_batch, returning);
+            // Handle RETURNING clause (return inserted rows or empty for now)
+            if insert.returning.is_some() {
+                // For UPSERT, RETURNING is complex - for now return inserted count
+                return Ok(Response::Execution(pgwire::api::results::Tag::new(
+                    &format!("INSERT 0 {}", inserted_count),
+                )));
             }
 
             Ok(Response::Execution(pgwire::api::results::Tag::new(
-                &format!("INSERT 0 {}", row_count),
+                &format!("INSERT 0 {}", inserted_count),
             )))
         } else {
             Err(user_error("Invalid INSERT statement".to_string()))
+        }
+    }
+
+    /// Helper to get a cell value as string for comparison
+    fn get_value_as_string(
+        &self,
+        batch: &arrow::record_batch::RecordBatch,
+        col_idx: usize,
+        row: usize,
+    ) -> String {
+        use arrow::array::{BooleanArray, Float64Array, Int64Array, StringArray};
+
+        let column = batch.column(col_idx);
+
+        if let Some(arr) = column.as_any().downcast_ref::<Int64Array>() {
+            arr.value(row).to_string()
+        } else if let Some(arr) = column.as_any().downcast_ref::<Float64Array>() {
+            arr.value(row).to_string()
+        } else if let Some(arr) = column.as_any().downcast_ref::<StringArray>() {
+            arr.value(row).to_string()
+        } else if let Some(arr) = column.as_any().downcast_ref::<BooleanArray>() {
+            arr.value(row).to_string()
+        } else {
+            String::new()
         }
     }
 

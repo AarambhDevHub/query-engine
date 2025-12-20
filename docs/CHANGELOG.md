@@ -21,9 +21,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 #### Write Operations
 - **CREATE TABLE** statement with data type support (INT, VARCHAR, BOOLEAN, etc.)
 - **INSERT INTO** with multi-row VALUES support
+- **UPSERT (ON CONFLICT)** with `DO NOTHING` and `DO UPDATE SET` actions
 - **UPDATE** with SET clause and WHERE filtering
 - **DELETE FROM** with WHERE filtering
 - **TRUE/FALSE** boolean literals in parser
+
+#### Recursive CTEs
+- **WITH RECURSIVE** support for recursive queries
+- **UNION / UNION ALL** set operations
+- Fixed-point iteration with automatic termination
+
 
 #### Transaction Commands
 - **BEGIN/COMMIT/ROLLBACK** command recognition (auto-commit mode)

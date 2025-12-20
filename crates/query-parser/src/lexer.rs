@@ -97,6 +97,13 @@ pub enum Token {
     // Index type keywords
     BTree,
     Hash,
+    // UPSERT keywords
+    Conflict,
+    Do,
+    Nothing,
+    // Set operation keywords
+    Union,
+    All,
 
     // Operators
     Plus,
@@ -400,6 +407,13 @@ impl Lexer {
             // Index types
             "BTREE" => Token::BTree,
             "HASH" => Token::Hash,
+            // UPSERT keywords
+            "CONFLICT" => Token::Conflict,
+            "DO" => Token::Do,
+            "NOTHING" => Token::Nothing,
+            // Set operation keywords
+            "UNION" => Token::Union,
+            "ALL" => Token::All,
             _ => Token::Identifier(ident),
         };
 

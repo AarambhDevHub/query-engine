@@ -210,8 +210,10 @@ The following PostgreSQL features are **not supported** in this implementation:
 
 | Category | Feature | Notes |
 |----------|---------|-------|
-| | UPSERT (ON CONFLICT) | Not implemented |
-| | Recursive CTEs | WITH RECURSIVE not supported |
+| | UPSERT (ON CONFLICT) | **Implemented** - `DO NOTHING` and `DO UPDATE SET` supported |
+| | Recursive CTEs | **Implemented** - WITH RECURSIVE with UNION ALL and fixed-point iteration |
+| | DISTINCT ON | Only standard DISTINCT |
+
 | | DISTINCT ON | Only standard DISTINCT |
 | | FULL TEXT SEARCH | No tsvector/tsquery |
 | **Transactions** | SAVEPOINT | Only BEGIN/COMMIT/ROLLBACK |

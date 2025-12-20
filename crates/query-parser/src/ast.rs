@@ -47,6 +47,26 @@ pub struct SelectStatement {
     pub order_by: Vec<OrderByExpr>,
     pub limit: Option<usize>,
     pub offset: Option<usize>,
+    /// Optional UNION/UNION ALL with another SELECT
+    pub union_clause: Option<Box<UnionClause>>,
+}
+
+/// UNION clause: UNION [ALL] SELECT ...
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnionClause {
+    /// Type of set operation
+    pub set_op: SetOperation,
+    /// The right side of the UNION
+    pub select: SelectStatement,
+}
+
+/// Set operation types
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SetOperation {
+    /// UNION (removes duplicates)
+    Union,
+    /// UNION ALL (keeps duplicates)
+    UnionAll,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -311,7 +331,7 @@ pub struct ColumnDef {
 }
 
 /// INSERT statement
-/// Syntax: INSERT INTO table [(columns)] VALUES (values), ... [RETURNING ...]
+/// Syntax: INSERT INTO table [(columns)] VALUES (values), ... [ON CONFLICT ...] [RETURNING ...]
 #[derive(Debug, Clone, PartialEq)]
 pub struct InsertStatement {
     /// Table name
@@ -320,8 +340,29 @@ pub struct InsertStatement {
     pub columns: Option<Vec<String>>,
     /// Values to insert (each inner Vec is one row)
     pub values: Vec<Vec<Expr>>,
+    /// ON CONFLICT clause for UPSERT behavior
+    pub on_conflict: Option<OnConflictClause>,
     /// RETURNING clause (columns to return from inserted rows)
     pub returning: Option<Vec<SelectItem>>,
+}
+
+/// ON CONFLICT clause for UPSERT
+/// Syntax: ON CONFLICT (columns) DO UPDATE SET ... | DO NOTHING
+#[derive(Debug, Clone, PartialEq)]
+pub struct OnConflictClause {
+    /// Conflict target columns (e.g., ON CONFLICT (id))
+    pub columns: Vec<String>,
+    /// Action to take on conflict
+    pub action: ConflictAction,
+}
+
+/// Action to take when a conflict occurs
+#[derive(Debug, Clone, PartialEq)]
+pub enum ConflictAction {
+    /// DO NOTHING - skip the conflicting row
+    DoNothing,
+    /// DO UPDATE SET col = value, ... - update the existing row
+    DoUpdate { assignments: Vec<Assignment> },
 }
 
 /// UPDATE statement

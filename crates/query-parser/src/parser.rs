@@ -229,7 +229,7 @@ impl Parser {
         }
     }
 
-    /// Parse INSERT INTO table [(columns)] VALUES (values), ...
+    /// Parse INSERT INTO table [(columns)] VALUES (values), ... [ON CONFLICT ...] [RETURNING ...]
     fn parse_insert_statement(&mut self) -> Result<Statement> {
         self.expect_token(&Token::Insert)?;
         self.expect_token(&Token::Into)?;
@@ -267,6 +267,38 @@ impl Parser {
                 break;
             }
         }
+
+        // Parse optional ON CONFLICT clause
+        let on_conflict = if self.match_token(&Token::On) {
+            self.expect_token(&Token::Conflict)?;
+            self.expect_token(&Token::LeftParen)?;
+            let mut conflict_cols = Vec::new();
+            loop {
+                conflict_cols.push(self.parse_identifier()?);
+                if !self.match_token(&Token::Comma) {
+                    break;
+                }
+            }
+            self.expect_token(&Token::RightParen)?;
+            self.expect_token(&Token::Do)?;
+
+            let action = if self.match_token(&Token::Nothing) {
+                ConflictAction::DoNothing
+            } else {
+                self.expect_token(&Token::Update)?;
+                self.expect_token(&Token::Set)?;
+                let assignments = self.parse_assignments()?;
+                ConflictAction::DoUpdate { assignments }
+            };
+
+            Some(OnConflictClause {
+                columns: conflict_cols,
+                action,
+            })
+        } else {
+            None
+        };
+
         // Parse optional RETURNING clause
         let returning = if self.match_token(&Token::Returning) {
             Some(self.parse_projection()?)
@@ -278,6 +310,7 @@ impl Parser {
             table,
             columns,
             values,
+            on_conflict,
             returning,
         }))
     }
@@ -376,6 +409,23 @@ impl Parser {
         Ok(Statement::DropIndex(DropIndexStatement { name, if_exists }))
     }
 
+    /// Parse assignment list: col = value, col2 = value2, ...
+    /// Used by UPDATE SET and ON CONFLICT DO UPDATE SET
+    fn parse_assignments(&mut self) -> Result<Vec<Assignment>> {
+        let mut assignments = Vec::new();
+        loop {
+            let column = self.parse_identifier()?;
+            self.expect_token(&Token::Equal)?;
+            let value = self.parse_expr()?;
+            assignments.push(Assignment { column, value });
+
+            if !self.match_token(&Token::Comma) {
+                break;
+            }
+        }
+        Ok(assignments)
+    }
+
     /// Parse WITH clause: WITH [RECURSIVE] cte_name [(col1, ...)] AS (SELECT ...), ...
     fn parse_with_statement(&mut self) -> Result<Statement> {
         self.expect_token(&Token::With)?;
@@ -470,6 +520,22 @@ impl Parser {
             None
         };
 
+        // Parse optional UNION/UNION ALL before ORDER BY
+        let union_clause = if self.match_token(&Token::Union) {
+            let set_op = if self.match_token(&Token::All) {
+                SetOperation::UnionAll
+            } else {
+                SetOperation::Union
+            };
+            let right_select = self.parse_select_statement()?;
+            Some(Box::new(UnionClause {
+                set_op,
+                select: right_select,
+            }))
+        } else {
+            None
+        };
+
         let order_by = if self.match_token(&Token::Order) {
             self.expect_token(&Token::By)?;
             self.parse_order_by()?
@@ -499,6 +565,7 @@ impl Parser {
             order_by,
             limit,
             offset,
+            union_clause,
         })
     }
 

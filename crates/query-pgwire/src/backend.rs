@@ -239,6 +239,7 @@ impl QueryBackend {
         // Base query is the left part (before UNION ALL)
         // Recursive query is the right part (after UNION ALL)
         let base_select = query_parser::SelectStatement {
+            distinct_on: None,
             projection: cte_query.projection.clone(),
             from: cte_query.from.clone(),
             joins: cte_query.joins.clone(),

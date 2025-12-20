@@ -196,13 +196,16 @@ Current limitations and planned future improvements:
 | Transactions | BEGIN, COMMIT, ROLLBACK support (auto-commit mode) |
 | CREATE TABLE | Create in-memory tables with typed columns |
 | INSERT | Insert rows with multi-row VALUES support |
+| UPSERT (ON CONFLICT) | `DO NOTHING` and `DO UPDATE SET` supported |
 | UPDATE | Update column values with WHERE clause filtering |
 | DELETE | Delete rows with WHERE clause filtering |
+| Recursive CTEs | WITH RECURSIVE with UNION ALL and fixed-point iteration |
 | System Catalogs | `pg_catalog.pg_tables`, `pg_attribute`, `pg_type`, and `information_schema.columns` |
 | COPY Command | `COPY table TO STDOUT` and `COPY table FROM STDIN` with CSV format |
 | Server-Side Cursors | DECLARE, FETCH, CLOSE cursor commands |
 | SCRAM-SHA-256 | More secure authentication (use `.with_method(AuthMethod::ScramSha256)`) |
 | Named Portals | Result pagination via extended protocol |
+| DISTINCT ON | Select distinct rows based on specific columns |
 
 ### Not Yet Implemented
 
@@ -210,11 +213,6 @@ The following PostgreSQL features are **not supported** in this implementation:
 
 | Category | Feature | Notes |
 |----------|---------|-------|
-| | UPSERT (ON CONFLICT) | **Implemented** - `DO NOTHING` and `DO UPDATE SET` supported |
-| | Recursive CTEs | **Implemented** - WITH RECURSIVE with UNION ALL and fixed-point iteration |
-| | DISTINCT ON | Only standard DISTINCT |
-
-| | DISTINCT ON | Only standard DISTINCT |
 | | FULL TEXT SEARCH | No tsvector/tsquery |
 | **Transactions** | SAVEPOINT | Only BEGIN/COMMIT/ROLLBACK |
 | | Nested transactions | Not supported |
@@ -224,6 +222,7 @@ The following PostgreSQL features are **not supported** in this implementation:
 | | DROP TABLE | Tables persist until server restart |
 | | Foreign keys | No referential integrity |
 | | CHECK constraints | Not enforced |
+
 | | DEFAULT values | Not supported in CREATE TABLE |
 | | Sequences/SERIAL | Use explicit INT64 |
 | | Views | CREATE VIEW not supported |

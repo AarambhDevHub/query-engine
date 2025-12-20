@@ -4,6 +4,7 @@ use query_core::{QueryError, Result};
 pub enum Token {
     // Keywords
     Select,
+    Distinct,
     From,
     Where,
     Group,
@@ -314,6 +315,7 @@ impl Lexer {
 
         let token = match ident.to_uppercase().as_str() {
             "SELECT" => Token::Select,
+            "DISTINCT" => Token::Distinct,
             "FROM" => Token::From,
             "WHERE" => Token::Where,
             "GROUP" => Token::Group,

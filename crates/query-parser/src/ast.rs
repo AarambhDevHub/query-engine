@@ -38,6 +38,8 @@ pub struct CteDefinition {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SelectStatement {
+    /// DISTINCT ON (col1, col2, ...) - PostgreSQL specific
+    pub distinct_on: Option<Vec<Expr>>,
     pub projection: Vec<SelectItem>,
     pub from: Option<TableReference>,
     pub joins: Vec<Join>,

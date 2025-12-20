@@ -209,7 +209,7 @@ Current limitations and planned future improvements:
 The following PostgreSQL features are **not supported** in this implementation:
 
 | Category | Feature | Notes |
-| **Query Features** | RETURNING clause | INSERT/UPDATE/DELETE don't return rows |
+|----------|---------|-------|
 | | UPSERT (ON CONFLICT) | Not implemented |
 | | Recursive CTEs | WITH RECURSIVE not supported |
 | | DISTINCT ON | Only standard DISTINCT |

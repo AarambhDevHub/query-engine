@@ -267,11 +267,18 @@ impl Parser {
                 break;
             }
         }
+        // Parse optional RETURNING clause
+        let returning = if self.match_token(&Token::Returning) {
+            Some(self.parse_projection()?)
+        } else {
+            None
+        };
 
         Ok(Statement::Insert(InsertStatement {
             table,
             columns,
             values,
+            returning,
         }))
     }
 
@@ -304,15 +311,22 @@ impl Parser {
         } else {
             None
         };
+        // Parse optional RETURNING clause
+        let returning = if self.match_token(&Token::Returning) {
+            Some(self.parse_projection()?)
+        } else {
+            None
+        };
 
         Ok(Statement::Update(UpdateStatement {
             table,
             assignments,
             selection,
+            returning,
         }))
     }
 
-    /// Parse DELETE FROM table [WHERE condition]
+    /// Parse DELETE FROM table [WHERE condition] [RETURNING ...]
     fn parse_delete_statement(&mut self) -> Result<Statement> {
         self.expect_token(&Token::Delete)?;
         self.expect_token(&Token::From)?;
@@ -327,7 +341,18 @@ impl Parser {
             None
         };
 
-        Ok(Statement::Delete(DeleteStatement { table, selection }))
+        // Parse optional RETURNING clause
+        let returning = if self.match_token(&Token::Returning) {
+            Some(self.parse_projection()?)
+        } else {
+            None
+        };
+
+        Ok(Statement::Delete(DeleteStatement {
+            table,
+            selection,
+            returning,
+        }))
     }
 
     /// Parse DROP statement (currently only DROP INDEX)

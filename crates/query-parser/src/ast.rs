@@ -311,7 +311,7 @@ pub struct ColumnDef {
 }
 
 /// INSERT statement
-/// Syntax: INSERT INTO table [(columns)] VALUES (values), ...
+/// Syntax: INSERT INTO table [(columns)] VALUES (values), ... [RETURNING ...]
 #[derive(Debug, Clone, PartialEq)]
 pub struct InsertStatement {
     /// Table name
@@ -320,10 +320,12 @@ pub struct InsertStatement {
     pub columns: Option<Vec<String>>,
     /// Values to insert (each inner Vec is one row)
     pub values: Vec<Vec<Expr>>,
+    /// RETURNING clause (columns to return from inserted rows)
+    pub returning: Option<Vec<SelectItem>>,
 }
 
 /// UPDATE statement
-/// Syntax: UPDATE table SET col=value, ... [WHERE condition]
+/// Syntax: UPDATE table SET col=value, ... [WHERE condition] [RETURNING ...]
 #[derive(Debug, Clone, PartialEq)]
 pub struct UpdateStatement {
     /// Table name
@@ -332,6 +334,8 @@ pub struct UpdateStatement {
     pub assignments: Vec<Assignment>,
     /// Optional WHERE clause
     pub selection: Option<Expr>,
+    /// RETURNING clause (columns to return from updated rows)
+    pub returning: Option<Vec<SelectItem>>,
 }
 
 /// Column assignment for UPDATE
@@ -344,11 +348,13 @@ pub struct Assignment {
 }
 
 /// DELETE statement
-/// Syntax: DELETE FROM table [WHERE condition]
+/// Syntax: DELETE FROM table [WHERE condition] [RETURNING ...]
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeleteStatement {
     /// Table name
     pub table: String,
     /// Optional WHERE clause
     pub selection: Option<Expr>,
+    /// RETURNING clause (columns to return from deleted rows)
+    pub returning: Option<Vec<SelectItem>>,
 }

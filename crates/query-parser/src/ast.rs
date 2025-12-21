@@ -180,6 +180,8 @@ pub enum BinaryOperator {
     GreaterEqual,
     And,
     Or,
+    // Full text search
+    TsMatch, // @@ operator
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -224,6 +226,9 @@ pub enum ScalarFunction {
     // Null handling
     Coalesce,
     Nullif,
+    // Full text search
+    ToTsVector,
+    ToTsQuery,
 }
 
 /// Window function types

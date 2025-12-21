@@ -4,6 +4,17 @@ All notable changes to Query Engine are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.4.0] - 2025-12-21
+
+### Added
+
+#### Full Text Search
+- **TO_TSVECTOR(text)** - Convert text to normalized search tokens
+- **TO_TSQUERY(query)** - Parse search query strings
+- **@@ operator** - Match tsvector against tsquery
+- New data types: `TsVector`, `TsQuery`
+- PostgreSQL catalog support (OIDs 3614, 3615)
+
 ## [0.3.0] - 2025-12-19
 
 ### Added

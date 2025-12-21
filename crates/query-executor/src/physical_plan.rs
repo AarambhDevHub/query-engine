@@ -131,6 +131,8 @@ pub enum BinaryOp {
     GreaterEqual,
     And,
     Or,
+    // Full text search
+    TsMatch, // @@
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -197,6 +199,9 @@ pub enum ScalarFunctionType {
     // Null handling
     Coalesce,
     Nullif,
+    // Full text search
+    ToTsVector,
+    ToTsQuery,
 }
 
 impl From<query_parser::BinaryOperator> for BinaryOp {
@@ -215,6 +220,7 @@ impl From<query_parser::BinaryOperator> for BinaryOp {
             query_parser::BinaryOperator::GreaterEqual => BinaryOp::GreaterEqual,
             query_parser::BinaryOperator::And => BinaryOp::And,
             query_parser::BinaryOperator::Or => BinaryOp::Or,
+            query_parser::BinaryOperator::TsMatch => BinaryOp::TsMatch,
         }
     }
 }

@@ -800,6 +800,9 @@ impl Planner {
                     | ScalarFunction::Power => Ok(DataType::Float64),
                     // Null handling - varies by argument
                     ScalarFunction::Coalesce | ScalarFunction::Nullif => Ok(DataType::Utf8),
+                    // Full text search - return TsVector/TsQuery types
+                    ScalarFunction::ToTsVector => Ok(DataType::TsVector),
+                    ScalarFunction::ToTsQuery => Ok(DataType::TsQuery),
                 }
             }
         }

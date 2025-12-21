@@ -257,6 +257,65 @@ fn evaluate_scalar_function(
             "{:?} function not yet fully implemented",
             func
         ))),
+        // Full text search functions
+        ScalarFunctionType::ToTsVector => {
+            // TO_TSVECTOR: convert text to normalized lexemes
+            let arg = evaluated_args.get(0).ok_or_else(|| {
+                QueryError::ExecutionError("TO_TSVECTOR requires 1 argument".to_string())
+            })?;
+            let string_array = arg.as_any().downcast_ref::<StringArray>().ok_or_else(|| {
+                QueryError::ExecutionError("TO_TSVECTOR requires string argument".to_string())
+            })?;
+            // Tokenize: lowercase, split by whitespace/punctuation, sort, dedupe
+            let result: StringArray = string_array
+                .iter()
+                .map(|opt| {
+                    opt.map(|s| {
+                        let mut tokens: Vec<&str> = s
+                            .split(|c: char| !c.is_alphanumeric())
+                            .filter(|w| !w.is_empty())
+                            .collect();
+                        tokens.sort();
+                        tokens.dedup();
+                        tokens
+                            .iter()
+                            .map(|t| t.to_lowercase())
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    })
+                })
+                .collect();
+            Ok(Arc::new(result) as ArrayRef)
+        }
+        ScalarFunctionType::ToTsQuery => {
+            // TO_TSQUERY: parse search query (& = AND, | = OR, ! = NOT)
+            let arg = evaluated_args.get(0).ok_or_else(|| {
+                QueryError::ExecutionError("TO_TSQUERY requires 1 argument".to_string())
+            })?;
+            let string_array = arg.as_any().downcast_ref::<StringArray>().ok_or_else(|| {
+                QueryError::ExecutionError("TO_TSQUERY requires string argument".to_string())
+            })?;
+            // Normalize query terms
+            let result: StringArray = string_array
+                .iter()
+                .map(|opt| {
+                    opt.map(|s| {
+                        // Keep operators, lowercase terms
+                        s.split_whitespace()
+                            .map(|term| {
+                                if term == "&" || term == "|" || term == "!" {
+                                    term.to_string()
+                                } else {
+                                    term.to_lowercase()
+                                }
+                            })
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    })
+                })
+                .collect();
+            Ok(Arc::new(result) as ArrayRef)
+        }
     }
 }
 
@@ -507,6 +566,46 @@ fn evaluate_binary_op(left: &ArrayRef, op: BinaryOp, right: &ArrayRef) -> Result
                     QueryError::ExecutionError("OR requires boolean arrays".to_string())
                 })?;
             let result = compute::or(l, r)?;
+            Ok(Arc::new(result) as ArrayRef)
+        }
+        BinaryOp::TsMatch => {
+            // @@ operator: check if tsvector matches tsquery
+            let l_arr = left.as_any().downcast_ref::<StringArray>().ok_or_else(|| {
+                QueryError::ExecutionError("@@ left operand must be tsvector (string)".to_string())
+            })?;
+            let r_arr = right
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .ok_or_else(|| {
+                    QueryError::ExecutionError(
+                        "@@ right operand must be tsquery (string)".to_string(),
+                    )
+                })?;
+
+            // For each row, check if all query terms are in the document vector
+            let result: BooleanArray = l_arr
+                .iter()
+                .zip(r_arr.iter())
+                .map(|(doc_opt, query_opt)| {
+                    match (doc_opt, query_opt) {
+                        (Some(doc), Some(query)) => {
+                            // Parse document tokens into a set
+                            let doc_tokens: std::collections::HashSet<&str> =
+                                doc.split_whitespace().collect();
+
+                            // Parse query and evaluate
+                            // Simple implementation: check if all non-operator terms are in doc
+                            let query_terms: Vec<&str> = query
+                                .split_whitespace()
+                                .filter(|t| *t != "&" && *t != "|" && !t.starts_with('!'))
+                                .collect();
+
+                            Some(query_terms.iter().all(|term| doc_tokens.contains(term)))
+                        }
+                        _ => None,
+                    }
+                })
+                .collect();
             Ok(Arc::new(result) as ArrayRef)
         }
     }

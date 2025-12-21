@@ -983,7 +983,9 @@ impl Parser {
             | Token::Sqrt
             | Token::Power
             | Token::Coalesce
-            | Token::Nullif => self.parse_scalar_function(),
+            | Token::Nullif
+            | Token::ToTsVector
+            | Token::ToTsQuery => self.parse_scalar_function(),
             Token::LeftParen => {
                 self.advance();
                 // Check if this is a scalar subquery
@@ -1074,6 +1076,8 @@ impl Parser {
             Token::Power => ScalarFunction::Power,
             Token::Coalesce => ScalarFunction::Coalesce,
             Token::Nullif => ScalarFunction::Nullif,
+            Token::ToTsVector => ScalarFunction::ToTsVector,
+            Token::ToTsQuery => ScalarFunction::ToTsQuery,
             _ => {
                 return Err(QueryError::ParseError(
                     "Expected scalar function".to_string(),
@@ -1283,6 +1287,7 @@ impl Parser {
             Token::LessEqual => Some(BinaryOperator::LessEqual),
             Token::Greater => Some(BinaryOperator::Greater),
             Token::GreaterEqual => Some(BinaryOperator::GreaterEqual),
+            Token::AtAt => Some(BinaryOperator::TsMatch),
             _ => None,
         };
 

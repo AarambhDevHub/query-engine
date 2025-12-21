@@ -290,6 +290,9 @@ fn datatype_to_pg_oid(dt: &query_core::DataType) -> i32 {
         query_core::DataType::Circle => 718,      // circle
         // Enum (user-defined)
         query_core::DataType::Enum { .. } => 0, // custom enum OID
+        // Full text search
+        query_core::DataType::TsVector => 3614, // tsvector
+        query_core::DataType::TsQuery => 3615,  // tsquery
         query_core::DataType::Null => 0,
     }
 }
@@ -331,6 +334,9 @@ fn datatype_to_pg_name(dt: &query_core::DataType) -> String {
         query_core::DataType::Circle => "circle".to_string(),
         // Enum
         query_core::DataType::Enum { name, .. } => name.clone(),
+        // Full text search
+        query_core::DataType::TsVector => "tsvector".to_string(),
+        query_core::DataType::TsQuery => "tsquery".to_string(),
         query_core::DataType::Null => "unknown".to_string(),
     }
 }

@@ -105,6 +105,10 @@ pub enum Token {
     // Set operation keywords
     Union,
     All,
+    // Full text search
+    ToTsVector, // TO_TSVECTOR function
+    ToTsQuery,  // TO_TSQUERY function
+    TsMatch,    // @@ operator
 
     // Operators
     Plus,
@@ -118,6 +122,7 @@ pub enum Token {
     LessEqual,
     Greater,
     GreaterEqual,
+    AtAt, // @@ (text search match operator)
 
     // Delimiters
     LeftParen,
@@ -193,6 +198,17 @@ impl Lexer {
             '%' => {
                 self.advance();
                 Token::Percent
+            }
+            '@' => {
+                self.advance();
+                if self.current_char() == '@' {
+                    self.advance();
+                    Token::AtAt
+                } else {
+                    return Err(QueryError::ParseError(
+                        "Unexpected character '@', did you mean '@@'?".to_string(),
+                    ));
+                }
             }
             '=' => {
                 self.advance();
@@ -416,6 +432,9 @@ impl Lexer {
             // Set operation keywords
             "UNION" => Token::Union,
             "ALL" => Token::All,
+            // Full text search
+            "TO_TSVECTOR" | "TSVECTOR" => Token::ToTsVector,
+            "TO_TSQUERY" | "TSQUERY" | "PLAINTO_TSQUERY" => Token::ToTsQuery,
             _ => Token::Identifier(ident),
         };
 

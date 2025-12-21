@@ -121,6 +121,19 @@ CREATE TABLE tasks (
 );
 ```
 
+## Full Text Search Types
+
+| Type | Storage | Description |
+|------|---------|-------------|
+| `TSVECTOR` | Text | Document search tokens |
+| `TSQUERY` | Text | Search query |
+
+```sql
+-- Full text search example
+SELECT * FROM articles 
+WHERE TO_TSVECTOR(content) @@ TO_TSQUERY('database');
+```
+
 ## String Types
 
 | Type | Description | Max Length |

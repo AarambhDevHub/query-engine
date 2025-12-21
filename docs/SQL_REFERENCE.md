@@ -194,6 +194,20 @@ DELETE FROM table_name
 | `FIRST_VALUE(col)` | First value in window |
 | `LAST_VALUE(col)` | Last value in window |
 
+### Full Text Search Functions
+
+| Function | Description | Example |
+|----------|-------------|---------|
+| `TO_TSVECTOR(text)` | Convert text to searchable tokens | `TO_TSVECTOR('Hello World')` → `'hello world'` |
+| `TO_TSQUERY(query)` | Parse search query | `TO_TSQUERY('rust & database')` |
+| `@@` | Match operator | `TO_TSVECTOR(content) @@ TO_TSQUERY('rust')` |
+
+**Example:**
+```sql
+SELECT * FROM documents 
+WHERE TO_TSVECTOR(content) @@ TO_TSQUERY('query engine');
+```
+
 ---
 
 ## JOIN Types

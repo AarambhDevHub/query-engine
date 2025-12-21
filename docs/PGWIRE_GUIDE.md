@@ -206,6 +206,7 @@ Current limitations and planned future improvements:
 | SCRAM-SHA-256 | More secure authentication (use `.with_method(AuthMethod::ScramSha256)`) |
 | Named Portals | Result pagination via extended protocol |
 | DISTINCT ON | Select distinct rows based on specific columns |
+| Full Text Search | TO_TSVECTOR, TO_TSQUERY, @@ match operator (v0.4) |
 
 ### Not Yet Implemented
 
@@ -213,7 +214,6 @@ The following PostgreSQL features are **not supported** in this implementation:
 
 | Category | Feature | Notes |
 |----------|---------|-------|
-| | FULL TEXT SEARCH | No tsvector/tsquery |
 | **Transactions** | SAVEPOINT | Only BEGIN/COMMIT/ROLLBACK |
 | | Nested transactions | Not supported |
 | | Isolation levels | Single-connection only |

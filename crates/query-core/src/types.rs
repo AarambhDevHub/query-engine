@@ -37,6 +37,9 @@ pub enum DataType {
     Circle,      // Circle <(x,y),r>
     // Enum type
     Enum { name: String, values: Vec<String> }, // User-defined enum
+    // Full text search types
+    TsVector, // Text search document vector (stored as Utf8)
+    TsQuery,  // Text search query (stored as Utf8)
 }
 
 impl DataType {
@@ -84,6 +87,8 @@ impl DataType {
             | DataType::Circle => ArrowDataType::Utf8,
             // Enum stored as text
             DataType::Enum { .. } => ArrowDataType::Utf8,
+            // Full text search types stored as text
+            DataType::TsVector | DataType::TsQuery => ArrowDataType::Utf8,
         }
     }
 
